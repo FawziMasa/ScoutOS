@@ -1,7 +1,13 @@
 import backgroundImage from "../assets/login-bg.png";
 import "./Login.css";
+import { Link } from "react-router-dom";
 
 function Login() {
+    const handleLogin = () => {
+        sessionStorage.setItem("loggedIn", "true");
+        window.location.href = "/dashboard";
+    };
+
     return (
         <div
             className="login-page"
@@ -10,7 +16,6 @@ function Login() {
             }}
         >
             <div className="login-card">
-
                 <h1>SweifiehOS</h1>
 
                 <h2>Welcome Back</h2>
@@ -25,18 +30,24 @@ function Login() {
                     placeholder="Password"
                 />
 
-                <button className="login-btn">
+                <button
+                    className="login-btn"
+                    onClick={handleLogin}
+                >
                     Login
                 </button>
 
-                <button className="create-btn">
+                <br /><br />
+
+                <Link to="/register">
                     Create Account
-                </button>
+                </Link>
 
-                <p className="quote">
-                    Leave the world a little better than you found it.
-                </p>
+                <br /><br />
 
+                <Link to="/forgot-password">
+                    Forgot Password?
+                </Link>
             </div>
         </div>
     );

@@ -1,9 +1,19 @@
 function Dashboard() {
     return (
-        <>
-            <h1>Dashboard</h1>
-            <p>Welcome to ScoutOS.</p>
-        </>
+        <div style={{ padding: "40px" }}>
+            <h1>SweifiehOS Dashboard</h1>
+
+            <p>Welcome to the system.</p>
+
+            <button
+                onClick={() => {
+                    sessionStorage.removeItem("loggedIn");
+                    window.location.href = "/";
+                }}
+            >
+                Logout
+            </button>
+        </div>
     );
 }
 
