@@ -1,10 +1,66 @@
+@import url("https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700;800&display=swap");
+
+:root {
+  font-family: "DM Sans", sans-serif;
+  color: #17231d;
+  background: #f5f6f2;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  --forest-950: #10271f;
+  --forest-900: #17372b;
+  --forest-800: #1f4938;
+  --forest-700: #286148;
+  --forest-600: #33785a;
+  --sage-100: #e5efe8;
+  --sage-50: #f0f5f1;
+  --gold-500: #c89a4b;
+  --gold-100: #f8edd9;
+  --ink: #17231d;
+  --muted: #6f7d75;
+  --line: #e4e8e3;
+  --surface: #ffffff;
+  --canvas: #f5f6f2;
+  --danger: #b54b4b;
+  --shadow-sm: 0 8px 24px rgba(23, 55, 43, 0.06);
+  --shadow-lg: 0 28px 70px rgba(16, 39, 31, 0.16);
+}
+
 * {
+  box-sizing: border-box;
   margin: 0;
   padding: 0;
-  box-sizing: border-box;
+}
+
+html {
+  background: var(--canvas);
 }
 
 body {
-  font-family: Arial, sans-serif;
-  background-color: #f4f6f9;
+  min-width: 320px;
+  min-height: 100vh;
+  background: var(--canvas);
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  color: inherit;
+}
+
+a {
+  color: inherit;
+}
+
+::selection {
+  color: white;
+  background: var(--forest-700);
 }

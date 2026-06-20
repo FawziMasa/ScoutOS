@@ -1,90 +1,126 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import type { FormEvent } from "react";
+import { Link, useNavigate } from "react-router-dom";
+import Icon from "../components/Icon";
+import { api, saveSession } from "../lib/api";
+import "./Login.css";
 
 function Register() {
-    const [fullName, setFullName] = useState("");
-    const [username, setUsername] = useState("");
-    const [email, setEmail] = useState("");
-    const [password, setPassword] = useState("");
-    const [confirmPassword, setConfirmPassword] = useState("");
+  const navigate = useNavigate();
+  const [form, setForm] = useState({
+    fullName: "",
+    username: "",
+    password: "",
+    confirmPassword: "",
+  });
+  const [setupRequired, setSetupRequired] = useState<boolean | null>(null);
+  const [error, setError] = useState("");
+  const [loading, setLoading] = useState(false);
 
-    const handleRegister = () => {
-        if (
-            !fullName ||
-            !username ||
-            !email ||
-            !password ||
-            !confirmPassword
-        ) {
-            alert("Please fill all fields.");
-            return;
-        }
+  useEffect(() => {
+    api.setupStatus()
+      .then(({ setupRequired: required }) => setSetupRequired(required))
+      .catch((setupError) => {
+        setError(setupError instanceof Error ? setupError.message : "Backend is unavailable.");
+        setSetupRequired(false);
+      });
+  }, []);
 
-        if (!email.includes("@")) {
-            alert("Invalid email.");
-            return;
-        }
+  const handleRegister = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
 
-        if (password.length < 8) {
-            alert("Password must be at least 8 characters.");
-            return;
-        }
+    if (Object.values(form).some((value) => !value.trim())) {
+      setError("Please complete every field.");
+      return;
+    }
+    if (form.password.length < 8) {
+      setError("Password must contain at least 8 characters.");
+      return;
+    }
+    if (form.password !== form.confirmPassword) {
+      setError("Your passwords do not match.");
+      return;
+    }
 
-        if (password !== confirmPassword) {
-            alert("Passwords do not match.");
-            return;
-        }
+    try {
+      setLoading(true);
+      const result = await api.setup({
+        fullName: form.fullName,
+        username: form.username,
+        password: form.password,
+      });
+      saveSession(result.token, result.user, true);
+      navigate("/dashboard");
+    } catch (setupError) {
+      setError(setupError instanceof Error ? setupError.message : "Setup failed.");
+    } finally {
+      setLoading(false);
+    }
+  };
 
-        alert("Account created successfully.");
+  const update = (key: keyof typeof form, value: string) => {
+    setForm({ ...form, [key]: value });
+    setError("");
+  };
 
-        window.location.href = "/";
-    };
-
-    return (
-        <div style={{ padding: "40px" }}>
-            <h1>Create Account</h1>
-
-            <input
-                placeholder="Full Name"
-                value={fullName}
-                onChange={(e) => setFullName(e.target.value)}
-            />
-            <br /><br />
-
-            <input
-                placeholder="Username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-            />
-            <br /><br />
-
-            <input
-                placeholder="Email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-            />
-            <br /><br />
-
-            <input
-                type="password"
-                placeholder="Password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-            />
-            <br /><br />
-
-            <input
-                type="password"
-                placeholder="Confirm Password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-            />
-            <br /><br />
-
-            <button onClick={handleRegister}>
-                Create Account
-            </button>
+  return (
+    <main className="auth-page auth-page-simple">
+      <section className="auth-content auth-content-wide">
+        <div className="auth-mobile-brand always-visible">
+          <span className="auth-brand-mark"><Icon name="shield" size={24} /></span>
+          <strong>ScoutOS</strong>
         </div>
-    );
+
+        <form className="auth-card auth-card-wide" onSubmit={handleRegister}>
+          <div className="auth-heading">
+            <span className="eyebrow">Initial system setup</span>
+            <h2>Create the Admin account</h2>
+            <p>The first account controls ScoutOS and can later create Group Leader and Unit Leader accounts.</p>
+          </div>
+
+          {error && <div className="form-error">{error}</div>}
+
+          {setupRequired === false ? (
+            <div className="success-message">
+              <span><Icon name="check" /></span>
+              <div>
+                <strong>ScoutOS is already configured</strong>
+                <p>Ask your Administrator to create an account for you.</p>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="auth-form-grid">
+                <label className="field field-wide">
+                  <span>Full name</span>
+                  <input value={form.fullName} onChange={(event) => update("fullName", event.target.value)} placeholder="Administrator's full name" />
+                </label>
+                <label className="field field-wide">
+                  <span>Username</span>
+                  <input autoComplete="username" value={form.username} onChange={(event) => update("username", event.target.value)} placeholder="Choose an admin username" />
+                </label>
+                <label className="field">
+                  <span>Password</span>
+                  <input autoComplete="new-password" type="password" value={form.password} onChange={(event) => update("password", event.target.value)} placeholder="At least 8 characters" />
+                </label>
+                <label className="field">
+                  <span>Confirm password</span>
+                  <input autoComplete="new-password" type="password" value={form.confirmPassword} onChange={(event) => update("confirmPassword", event.target.value)} placeholder="Repeat your password" />
+                </label>
+              </div>
+
+              <button className="button button-primary button-full" disabled={loading || setupRequired === null} type="submit">
+                {loading ? "Creating Admin…" : "Create Admin account"}
+                <Icon name="chevron" size={18} />
+              </button>
+            </>
+          )}
+
+          <p className="auth-switch"><Link to="/">← Back to sign in</Link></p>
+        </form>
+      </section>
+    </main>
+  );
 }
 
 export default Register;

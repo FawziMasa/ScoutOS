@@ -9,13 +9,10 @@ import ForgotPassword from "./pages/ForgotPassword";
 import Login from "./pages/Login";
 import Register from "./pages/Register";
 import Scouts from "./pages/Scouts";
+import { getToken } from "./lib/api";
 
 function ProtectedRoute() {
-  const loggedIn =
-    sessionStorage.getItem("loggedIn") ||
-    localStorage.getItem("loggedIn");
-
-  return loggedIn ? <AppLayout /> : <Navigate to="/" replace />;
+  return getToken() ? <AppLayout /> : <Navigate to="/" replace />;
 }
 
 function App() {
