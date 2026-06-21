@@ -270,7 +270,7 @@ const server = createServer(async (request, response) => {
         console.error(error);
 
         return send(response, 500, {
-          error: "Failed to load units",
+          error: error.message,
         });
       }
     }
@@ -432,8 +432,7 @@ const server = createServer(async (request, response) => {
     return send(response, 400, { error: error.message || "Request failed." });
   }
 });
-
-server.listen(port, "127.0.0.1", () => {
-  console.log(`ScoutOS backend running at http://127.0.0.1:${port}`);
+server.listen(port, "0.0.0.0", () => {
+  console.log(`ScoutOS backend running at http://0.0.0.0:${port}`);
   console.log(`Storage: ${storePath}`);
 });
