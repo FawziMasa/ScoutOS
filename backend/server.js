@@ -15,6 +15,7 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import db from "./database/db.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dataDirectory = process.env.DATA_DIR
@@ -256,6 +257,22 @@ const server = createServer(async (request, response) => {
   try {
     if (request.method === "GET" && path === "/api/health") {
       return send(response, 200, { status: "ok", storage: "local-json" });
+    }
+
+    if (request.method === "GET" && path === "/api/units") {
+      try {
+        const [rows] = await db.execute(
+          "SELECT id, name FROM units ORDER BY id"
+        );
+
+        return send(response, 200, rows);
+      } catch (error) {
+        console.error(error);
+
+        return send(response, 500, {
+          error: "Failed to load units",
+        });
+      }
     }
 
     if (request.method === "GET" && path === "/api/auth/setup-status") {
