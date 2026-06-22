@@ -304,25 +304,48 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === "POST" && path === "/api/auth/login") {
-      const clientKey = request.socket.remoteAddress || "unknown";
-      if (isRateLimited(clientKey)) {
-        return send(response, 429, { error: "Too many login attempts. Try again in one minute." });
-      }
-
       const body = await readJson(request);
+
       const username = String(body.username || "").trim().toLowerCase();
       const password = String(body.password || "");
-      const user = readStore().users.find((candidate) => candidate.username === username);
 
-      if (!user || !user.active || !verifyPassword(password, user.passwordHash)) {
-        recordFailedLogin(clientKey);
-        return send(response, 401, { error: "Incorrect username or password." });
+      const [rows] = await db.execute(
+        "SELECT * FROM users WHERE username = ? LIMIT 1",
+        [username]
+      );
+
+      const account = rows[0];
+
+      if (!account) {
+        return send(response, 401, {
+          error: "Incorrect username or password.",
+        });
       }
 
-      loginAttempts.delete(clientKey);
-      return send(response, 200, { token: signToken(user), user: publicUser(user) });
-    }
+      if (
+        !verifyPassword(password, account.password_hash)
+      ) {
+        return send(response, 401, {
+          error: "Incorrect username or password.",
+        });
+      }
 
+      const authUser = {
+        id: String(account.id),
+        fullName: account.full_name,
+        username: account.username,
+        role: account.role,
+        unit: account.unit_id,
+        active: Boolean(account.active),
+        createdAt: account.created_at,
+      };
+
+      return send(response, 200, {
+        token: signToken(authUser),
+        user: publicUser(authUser),
+      });
+    }
+    
     const user = authenticate(request);
     if (!user) return send(response, 401, { error: "Authentication required." });
 
