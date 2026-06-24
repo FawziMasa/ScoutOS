@@ -26,7 +26,7 @@ export type Scout = {
 };
 
 export type ScoutInput = Omit<Scout, "id" | "createdAt" | "updatedAt">;
-const API_URL = "http://localhost:4000/api";
+const API_URL = import.meta.env.VITE_API_URL;
 const tokenKey = "scoutos-token";
 const userKey = "scoutos-user";
 
