@@ -73,9 +73,30 @@ function sendNoContent(response) {
   response.end();
 }
 function setCors(request, response) {
-  response.setHeader("Access-Control-Allow-Origin", "*");
-  response.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  response.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  const origin = request.headers.origin;
+
+  console.log("Origin:", origin);
+  console.log("Allowed:", allowedOrigin);
+
+  if (
+    origin === allowedOrigin ||
+    (!origin && process.env.NODE_ENV !== "production")
+  ) {
+    response.setHeader(
+      "Access-Control-Allow-Origin",
+      origin || allowedOrigin
+    );
+  }
+
+  response.setHeader("Vary", "Origin");
+  response.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type, Authorization"
+  );
+  response.setHeader(
+    "Access-Control-Allow-Methods",
+    "GET, POST, PUT, DELETE, OPTIONS"
+  );
 }
 
 async function readJson(request) {
@@ -253,8 +274,7 @@ function recordFailedLogin(key) {
   loginAttempts.set(key, [...(loginAttempts.get(key) || []), Date.now()]);
 }
 
-const server = createServer(async (request, response) => {
-  setCors(request, response);
+const server = createServer(async (request, response) => { setCors(request, response);
 
   if (request.method === "OPTIONS") {
     return sendNoContent(response);
