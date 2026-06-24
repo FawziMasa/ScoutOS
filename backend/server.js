@@ -72,13 +72,8 @@ function sendNoContent(response) {
   response.writeHead(204);
   response.end();
 }
-
 function setCors(request, response) {
-  const origin = request.headers.origin;
-  if (origin === allowedOrigin || (!origin && process.env.NODE_ENV !== "production")) {
-    response.setHeader("Access-Control-Allow-Origin", origin || allowedOrigin);
-  }
-  response.setHeader("Vary", "Origin");
+  response.setHeader("Access-Control-Allow-Origin", "*");
   response.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
   response.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
 }
