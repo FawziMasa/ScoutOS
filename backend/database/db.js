@@ -1,3 +1,5 @@
+import mysql from "mysql2/promise";
+
 const db = mysql.createPool({
     host: "sql12.freesqldatabase.com",
     port: 3306,
@@ -11,4 +13,5 @@ const db = mysql.createPool({
     connectionLimit: 10,
     queueLimit: 0,
 });
+
 export default db;
