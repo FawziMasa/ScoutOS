@@ -163,18 +163,32 @@ function publicUser(user) {
     active: user.active,
     createdAt: user.createdAt,
   };
-}
 
-function authenticate(request) {
+} async function authenticate(request) {
   const authorization = request.headers.authorization || "";
-  const token = authorization.startsWith("Bearer ") ? authorization.slice(7) : "";
+
+  console.log("AUTH HEADER:", authorization);
+
+  const token = authorization.startsWith("Bearer ")
+    ? authorization.slice(7)
+    : "";
+
+  console.log("TOKEN:", token);
+
   const claims = verifyToken(token);
+
+  console.log("CLAIMS:", claims);
+
   if (!claims) return null;
 
-  const user = readStore().users.find(
-    (candidate) => candidate.id === claims.sub && candidate.active,
+  const [rows] = await db.execute(
+    "SELECT * FROM users WHERE id = ? LIMIT 1",
+    [claims.sub]
   );
-  return user || null;
+
+  console.log("ROWS:", rows);
+
+  return rows[0] || null;
 }
 
 function canAccessScout(user, scout) {
@@ -261,11 +275,20 @@ const server = createServer(async (request, response) => {
 
     if (request.method === "GET" && path === "/api/units") {
       try {
-        const [rows] = await db.execute(
-          "SELECT id, name FROM units ORDER BY id"
-        );
-
-        return send(response, 200, rows);
+        return send(response, 200, {
+          scouts: rows.map((row) => ({
+            id: row.id,
+            name: row.name,
+            age: row.age,
+            unit: row.unit,
+            phone: row.phone,
+            guardian: row.guardian,
+            joinedAt: row.joined_at,
+            status: row.status,
+            createdAt: row.created_at,
+            updatedAt: row.updated_at,
+          })),
+        });
       } catch (error) {
         console.error(error);
 
@@ -345,8 +368,8 @@ const server = createServer(async (request, response) => {
         user: publicUser(authUser),
       });
     }
-    
-    const user = authenticate(request);
+
+    const user = await authenticate(request);
     if (!user) return send(response, 401, { error: "Authentication required." });
 
     if (request.method === "GET" && path === "/api/auth/me") {
@@ -385,75 +408,141 @@ const server = createServer(async (request, response) => {
       writeStore(store);
       return send(response, 201, { user: publicUser(newUser) });
     }
-
     if (path === "/api/scouts" && request.method === "GET") {
-      const scouts = readStore().scouts.filter((scout) => canAccessScout(user, scout));
+      const [rows] = await db.execute(
+        "SELECT * FROM scouts ORDER BY created_at DESC"
+      );
+
+      const scouts = rows.filter((scout) =>
+        canAccessScout(user, scout)
+      );
+
       return send(response, 200, { scouts });
     }
-
     if (path === "/api/scouts" && request.method === "POST") {
-      const store = readStore();
       const validation = validateScout(await readJson(request));
-      if (validation.error) return send(response, 400, { error: validation.error });
-      if (user.role === "UNIT_LEADER" && validation.value.unit !== user.unit) {
-        return send(response, 403, { error: "You can only add scouts to your assigned unit." });
+
+      if (validation.error) {
+        return send(response, 400, { error: validation.error });
+      }
+
+      if (
+        user.role === "UNIT_LEADER" &&
+        validation.value.unit !== user.unit
+      ) {
+        return send(response, 403, {
+          error: "You can only add scouts to your assigned unit.",
+        });
       }
 
       const scout = {
         id: randomUUID(),
         ...validation.value,
-        createdBy: user.id,
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
       };
-      store.scouts.unshift(scout);
-      writeStore(store);
+
+      await db.execute(
+        `INSERT INTO scouts
+    (id,name,age,unit,phone,guardian,joined_at,status,created_at,updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        [
+          scout.id,
+          scout.name,
+          scout.age,
+          scout.unit,
+          scout.phone,
+          scout.guardian,
+          scout.joinedAt,
+          scout.status,
+          new Date(),
+          new Date(),
+        ]
+      );
+
       return send(response, 201, { scout });
     }
 
     const scoutMatch = path.match(/^\/api\/scouts\/([a-f0-9-]+)$/i);
-    if (scoutMatch) {
-      const store = readStore();
-      const scoutIndex = store.scouts.findIndex((scout) => scout.id === scoutMatch[1]);
-      if (scoutIndex < 0) return send(response, 404, { error: "Scout not found." });
 
-      const scout = store.scouts[scoutIndex];
+    if (scoutMatch) {
+      const scoutId = scoutMatch[1];
+
+      const [rows] = await db.execute(
+        "SELECT * FROM scouts WHERE id = ? LIMIT 1",
+        [scoutId]
+      );
+
+      const scout = rows[0];
+
+      if (!scout) {
+        return send(response, 404, {
+          error: "Scout not found.",
+        });
+      }
+
       if (!canAccessScout(user, scout)) {
-        return send(response, 403, { error: "You cannot access this scout." });
+        return send(response, 403, {
+          error: "You cannot access this scout.",
+        });
       }
 
       if (request.method === "PUT") {
         const validation = validateScout(await readJson(request));
-        if (validation.error) return send(response, 400, { error: validation.error });
-        if (user.role === "UNIT_LEADER" && validation.value.unit !== user.unit) {
-          return send(response, 403, { error: "You cannot transfer scouts to another unit." });
+
+        if (validation.error) {
+          return send(response, 400, {
+            error: validation.error,
+          });
         }
 
-        const updatedScout = {
-          ...scout,
-          ...validation.value,
-          updatedAt: new Date().toISOString(),
-        };
-        store.scouts[scoutIndex] = updatedScout;
-        writeStore(store);
-        return send(response, 200, { scout: updatedScout });
+        await db.execute(
+          `UPDATE scouts
+       SET name=?,
+           age=?,
+           unit=?,
+           phone=?,
+           guardian=?,
+           joined_at=?,
+           status=?,
+           updated_at=?
+       WHERE id=?`,
+          [
+            validation.value.name,
+            validation.value.age,
+            validation.value.unit,
+            validation.value.phone,
+            validation.value.guardian,
+            validation.value.joinedAt,
+            validation.value.status,
+            new Date(),
+            scoutId,
+          ]
+        );
+
+        const [updatedRows] = await db.execute(
+          "SELECT * FROM scouts WHERE id = ?",
+          [scoutId]
+        );
+
+        return send(response, 200, {
+          scout: updatedRows[0],
+        });
       }
 
       if (request.method === "DELETE") {
-        if (user.role === "UNIT_LEADER" && scout.unit !== user.unit) {
-          return send(response, 403, { error: "You cannot remove this scout." });
-        }
-        store.scouts.splice(scoutIndex, 1);
-        writeStore(store);
+        await db.execute(
+          "DELETE FROM scouts WHERE id = ?",
+          [scoutId]
+        );
+
         return sendNoContent(response);
       }
     }
-
     return send(response, 404, { error: "Route not found." });
   } catch (error) {
     console.error(error);
     return send(response, 400, { error: error.message || "Request failed." });
   }
+
 });
 server.listen(port, "0.0.0.0", () => {
   console.log(`ScoutOS backend running at http://0.0.0.0:${port}`);

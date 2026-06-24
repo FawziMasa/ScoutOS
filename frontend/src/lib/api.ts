@@ -100,13 +100,20 @@ export const api = {
       false,
     ),
 
-  login: (username: string, password: string) =>
-    request<{ token: string; user: AuthUser }>(
-      "/auth/login",
-      { method: "POST", body: JSON.stringify({ username, password }) },
-      false,
-    ),
+   login: async(username: string, password: string) => {
+  const result = await request<{ token: string; user: AuthUser }>(
+    "/auth/login",
+    {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    },
+    false,
+  );
 
+  console.log("LOGIN RESPONSE:", result);
+
+  return result;
+},
   me: () => request<{ user: AuthUser }>("/auth/me"),
 
   scouts: {

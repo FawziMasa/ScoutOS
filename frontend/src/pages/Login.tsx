@@ -26,6 +26,12 @@ function Login() {
     try {
       setLoading(true);
       const result = await api.login(username, password);
+        console.log("LOGIN RESPONSE:", result);
+
+        saveSession(result.token, result.user, rememberMe);
+
+        console.log("TOKEN AFTER SAVE:", localStorage.getItem("scoutos-token"));
+        console.log("TOKEN AFTER SAVE SESSION:", sessionStorage.getItem("scoutos-token"));
       saveSession(result.token, result.user, rememberMe);
       navigate("/dashboard");
     } catch (loginError) {
