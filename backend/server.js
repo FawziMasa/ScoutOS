@@ -15,7 +15,9 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { ensureAttendanceSchema } from "./database/attendanceMigration.js";
 import db from "./database/db.js";
+import { handleAttendanceRoute } from "./routes/attendance.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dataDirectory = process.env.DATA_DIR
@@ -41,6 +43,10 @@ if (!existsSync(secretPath)) {
 }
 
 const tokenSecret = readFileSync(secretPath, "utf8").trim();
+
+await ensureAttendanceSchema().catch((error) => {
+  console.error("Attendance schema check failed:", error);
+});
 
 function readStore() {
   try {
@@ -75,17 +81,16 @@ function sendNoContent(response) {
 function setCors(request, response) {
   const origin = request.headers.origin;
 
-  console.log("Origin:", origin);
-  console.log("Allowed:", allowedOrigin);
+  const allowedOrigins = [
+    allowedOrigin,
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "https://scout-os-bay.vercel.app",
+    "https://scout-2d9py57t9-fawzi-masa.vercel.app",
+  ];
 
-  if (
-    origin === allowedOrigin ||
-    (!origin && process.env.NODE_ENV !== "production")
-  ) {
-    response.setHeader(
-      "Access-Control-Allow-Origin",
-      origin || allowedOrigin
-    );
+  if (origin && allowedOrigins.includes(origin)) {
+    response.setHeader("Access-Control-Allow-Origin", origin);
   }
 
   response.setHeader("Vary", "Origin");
@@ -274,7 +279,8 @@ function recordFailedLogin(key) {
   loginAttempts.set(key, [...(loginAttempts.get(key) || []), Date.now()]);
 }
 
-const server = createServer(async (request, response) => { setCors(request, response);
+const server = createServer(async (request, response) => {
+  setCors(request, response);
 
   if (request.method === "OPTIONS") {
     return sendNoContent(response);
@@ -390,6 +396,16 @@ const server = createServer(async (request, response) => { setCors(request, resp
     if (request.method === "GET" && path === "/api/auth/me") {
       return send(response, 200, { user: publicUser(user) });
     }
+
+    const attendanceHandled = await handleAttendanceRoute(request, response, {
+      path,
+      user,
+      send,
+      sendNoContent,
+      readJson,
+    });
+
+    if (attendanceHandled) return;
 
     if (path === "/api/users" && request.method === "GET") {
       if (!["ADMIN", "GROUP_LEADER"].includes(user.role)) {

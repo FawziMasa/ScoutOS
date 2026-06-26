@@ -10,6 +10,15 @@ import {
     type ScoutUnit,
 } from "../lib/api";
 
+type ScoutWithLegacyJoinedDate = Scout & {
+    joined_at?: string;
+};
+
+function scoutJoinDate(scout: Scout) {
+    const record = scout as ScoutWithLegacyJoinedDate;
+    return scout.joinedAt || record.joined_at || "";
+}
+
 const units: ScoutUnit[] = ["أشبال و زهرات", "مبتدئ", "متقدم", "جوالة", "قيادة"];
 
 function createEmptyForm(): ScoutInput {
@@ -187,9 +196,7 @@ function Scouts() {
                                     <td>{scout.age}</td>
                                     <td>{scout.phone}</td>
                                     <td>
-                                        {new Date(
-                                            (scout as any).joinedAt || (scout as any).joined_at
-                                        ).toLocaleDateString("en-GB", {
+                                        {new Date(scoutJoinDate(scout)).toLocaleDateString("en-GB", {
                                             day: "numeric",
                                             month: "short",
                                             year: "numeric",

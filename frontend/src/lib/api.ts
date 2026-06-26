@@ -1,6 +1,30 @@
 export type UserRole = "ADMIN" | "GROUP_LEADER" | "UNIT_LEADER";
-export type ScoutUnit = "أشبال و زهرات" | "مبتدئ" | "متقدم" | "جوالة" | "قيادة";
+
+export const scoutUnits = [
+  "أشبال و زهرات",
+  "مبتدئ",
+  "متقدم",
+  "جوالة",
+  "قيادة",
+] as const;
+
+export type ScoutUnit = (typeof scoutUnits)[number];
 export type ScoutStatus = "Active" | "Inactive";
+
+export const meetingTypes = [
+  "Weekly Meeting",
+  "Camp",
+  "Hike",
+  "Training",
+  "Competition",
+  "Service",
+  "Other",
+] as const;
+
+export type MeetingType = (typeof meetingTypes)[number];
+
+export const attendanceStatuses = ["present", "absent", "late", "excused"] as const;
+export type AttendanceStatus = (typeof attendanceStatuses)[number];
 
 export type AuthUser = {
   id: string;
@@ -17,6 +41,8 @@ export type Scout = {
   name: string;
   age: number;
   unit: ScoutUnit;
+  patrol?: string | null;
+  rank?: string | null;
   phone: string;
   guardian: string;
   joinedAt: string;
@@ -25,8 +51,91 @@ export type Scout = {
   updatedAt?: string;
 };
 
-export type ScoutInput = Omit<Scout, "id" | "createdAt" | "updatedAt">;
-const API_URL = import.meta.env.VITE_API_URL;
+export type ScoutInput = Omit<Scout, "id" | "createdAt" | "updatedAt" | "patrol" | "rank">;
+
+export type AttendanceSummary = {
+  totalScouts: number;
+  present: number;
+  absent: number;
+  late: number;
+  excused: number;
+  attendanceRate: number;
+};
+
+export type AttendanceSession = {
+  id: number;
+  meetingName: string;
+  meetingType: MeetingType;
+  meetingDate: string;
+  startTime: string;
+  endTime: string;
+  location: string;
+  notes: string;
+  createdBy: number | null;
+  createdAt: string;
+  updatedAt: string;
+  summary: AttendanceSummary;
+};
+
+export type AttendanceSessionInput = {
+  meetingName: string;
+  meetingType: MeetingType;
+  meetingDate: string;
+  startTime: string;
+  endTime: string;
+  location: string;
+  notes: string;
+};
+
+export type AttendanceRecord = {
+  id: number;
+  sessionId: number;
+  scoutId: string;
+  status: AttendanceStatus;
+  arrivalTime: string;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+  scout: Scout;
+};
+
+export type AttendanceSaveRecord = {
+  scoutId: string;
+  status: AttendanceStatus;
+  arrivalTime: string;
+  notes: string;
+};
+
+export type AttendanceSessionDetail = {
+  session: AttendanceSession;
+  records: AttendanceRecord[];
+};
+
+export type AttendanceSaveResult = AttendanceSessionDetail & {
+  updated: boolean;
+};
+
+export type ScoutAttendanceProfileSummary = {
+  scoutId: string;
+  total: number;
+  present: number;
+  absent: number;
+  late: number;
+  excused: number;
+  attendancePercentage: number;
+  history: Array<{
+    sessionId: number;
+    meetingName: string;
+    meetingType: MeetingType;
+    meetingDate: string;
+    location: string;
+    status: AttendanceStatus;
+    arrivalTime: string;
+    notes: string;
+  }>;
+};
+
+const API_URL = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
 const tokenKey = "scoutos-token";
 const userKey = "scoutos-user";
 
@@ -73,7 +182,14 @@ async function request<T>(
     if (token) headers.set("Authorization", `Bearer ${token}`);
   }
 
-  const response = await fetch(`${API_URL}${path}`, { ...options, headers });
+  let response: Response;
+
+  try {
+    response = await fetch(`${API_URL}${path}`, { ...options, headers });
+  } catch {
+    throw new Error("Network Error: ScoutOS backend is not reachable.");
+  }
+
   if (response.status === 204) return undefined as T;
 
   const body = await response.json().catch(() => ({}));
@@ -100,20 +216,16 @@ export const api = {
       false,
     ),
 
-   login: async(username: string, password: string) => {
-  const result = await request<{ token: string; user: AuthUser }>(
-    "/auth/login",
-    {
-      method: "POST",
-      body: JSON.stringify({ username, password }),
-    },
-    false,
-  );
+  login: (username: string, password: string) =>
+    request<{ token: string; user: AuthUser }>(
+      "/auth/login",
+      {
+        method: "POST",
+        body: JSON.stringify({ username, password }),
+      },
+      false,
+    ),
 
-  console.log("LOGIN RESPONSE:", result);
-
-  return result;
-},
   me: () => request<{ user: AuthUser }>("/auth/me"),
 
   scouts: {
@@ -130,6 +242,35 @@ export const api = {
       }),
     remove: (id: string) =>
       request<void>(`/scouts/${id}`, { method: "DELETE" }),
+  },
+
+  attendance: {
+    sessions: {
+      list: () => request<{ sessions: AttendanceSession[] }>("/attendance/sessions"),
+      get: (id: number) =>
+        request<AttendanceSessionDetail>(`/attendance/sessions/${id}`),
+      create: (input: AttendanceSessionInput) =>
+        request<{ session: AttendanceSession }>("/attendance/sessions", {
+          method: "POST",
+          body: JSON.stringify(input),
+        }),
+      update: (id: number, input: AttendanceSessionInput) =>
+        request<{ session: AttendanceSession }>(`/attendance/sessions/${id}`, {
+          method: "PUT",
+          body: JSON.stringify(input),
+        }),
+      remove: (id: number) =>
+        request<void>(`/attendance/sessions/${id}`, { method: "DELETE" }),
+    },
+    save: (input: { sessionId: number; records: AttendanceSaveRecord[] }) =>
+      request<AttendanceSaveResult>("/attendance/save", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    scoutSummary: (scoutId: string) =>
+      request<{ summary: ScoutAttendanceProfileSummary }>(
+        `/attendance/scouts/${scoutId}/summary`,
+      ),
   },
 };
 
