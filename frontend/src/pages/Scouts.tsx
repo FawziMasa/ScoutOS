@@ -4,6 +4,7 @@ import Icon from "../components/Icon";
 import {
     api,
     getStoredUser,
+    scoutUnits,
     type Scout,
     type ScoutInput,
     type ScoutStatus,
@@ -19,14 +20,14 @@ function scoutJoinDate(scout: Scout) {
     return scout.joinedAt || record.joined_at || "";
 }
 
-const units: ScoutUnit[] = ["أشبال و زهرات", "مبتدئ", "متقدم", "جوالة", "قيادة"];
+const units: ScoutUnit[] = [...scoutUnits];
 
 function createEmptyForm(): ScoutInput {
     const user = getStoredUser();
     return {
         name: "",
         age: 10,
-        unit: user?.role === "UNIT_LEADER" && user.unit ? user.unit : "أشبال و زهرات",
+        unit: user?.role === "UNIT_LEADER" && user.unit ? user.unit : scoutUnits[0],
         phone: "",
         guardian: "",
         joinedAt: new Date().toISOString().slice(0, 10),
@@ -39,7 +40,7 @@ function Scouts() {
     const unitLocked = user?.role === "UNIT_LEADER";
     const [scouts, setScouts] = useState<Scout[]>([]);
     const [search, setSearch] = useState("");
-    const [unitFilter, setUnitFilter] = useState("الكل");
+    const [unitFilter, setUnitFilter] = useState("all");
     const [modalOpen, setModalOpen] = useState(false);
     const [editingId, setEditingId] = useState<string | null>(null);
     const [form, setForm] = useState<ScoutInput>(createEmptyForm);
@@ -61,7 +62,7 @@ function Scouts() {
                 scout.name.toLowerCase().includes(query) ||
                 scout.guardian.toLowerCase().includes(query) ||
                 scout.phone.includes(query);
-            const matchesUnit = unitFilter === "الكل" || scout.unit === unitFilter;
+            const matchesUnit = unitFilter === "all" || scout.unit === unitFilter;
             return matchesSearch && matchesUnit;
         });
     }, [scouts, search, unitFilter]);
@@ -169,7 +170,7 @@ function Scouts() {
 
                     {!unitLocked && (
                         <select dir="rtl" value={unitFilter} onChange={(event) => setUnitFilter(event.target.value)}>
-                            <option value="الكل">كل الوحدات</option>
+                            <option value="all">كل الوحدات</option>
                             {units.map((unit) => <option key={unit} value={unit}>{unit}</option>)}
                         </select>
                     )}

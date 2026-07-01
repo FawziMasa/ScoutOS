@@ -2,3 +2,5 @@ data/store.json
 data/store.*.tmp
 data/.secret
 .test-data/
+.env
+.env.local

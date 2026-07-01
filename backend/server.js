@@ -15,7 +15,7 @@ import {
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensureAttendanceSchema } from "./database/attendanceMigration.js";
+import { ensureCoreSchema } from "./database/schema.js";
 import db from "./database/db.js";
 import { handleAttendanceRoute } from "./routes/attendance.js";
 
@@ -44,8 +44,8 @@ if (!existsSync(secretPath)) {
 
 const tokenSecret = readFileSync(secretPath, "utf8").trim();
 
-await ensureAttendanceSchema().catch((error) => {
-  console.error("Attendance schema check failed:", error);
+await ensureCoreSchema().catch((error) => {
+  console.error("Database schema check failed:", error);
 });
 
 function readStore() {
@@ -176,29 +176,25 @@ function verifyToken(token) {
 
 function publicUser(user) {
   return {
-    id: user.id,
-    fullName: user.fullName,
+    id: String(user.id),
+    fullName: user.fullName || user.full_name,
     username: user.username,
     role: user.role,
-    unit: user.unit,
-    active: user.active,
-    createdAt: user.createdAt,
+    unit: user.unit ?? user.unit_id ?? null,
+    active: Boolean(user.active),
+    createdAt: user.createdAt || user.created_at,
   };
 
-} async function authenticate(request) {
-  const authorization = request.headers.authorization || "";
+}
 
-  console.log("AUTH HEADER:", authorization);
+async function authenticate(request) {
+  const authorization = request.headers.authorization || "";
 
   const token = authorization.startsWith("Bearer ")
     ? authorization.slice(7)
     : "";
 
-  console.log("TOKEN:", token);
-
   const claims = verifyToken(token);
-
-  console.log("CLAIMS:", claims);
 
   if (!claims) return null;
 
@@ -207,9 +203,7 @@ function publicUser(user) {
     [claims.sub]
   );
 
-  console.log("ROWS:", rows);
-
-  return rows[0] || null;
+  return rows[0] ? publicUser(rows[0]) : null;
 }
 
 function canAccessScout(user, scout) {
@@ -291,58 +285,52 @@ const server = createServer(async (request, response) => {
 
   try {
     if (request.method === "GET" && path === "/api/health") {
-      return send(response, 200, { status: "ok", storage: "local-json" });
+      return send(response, 200, { status: "ok", storage: "mysql" });
     }
 
     if (request.method === "GET" && path === "/api/units") {
-      try {
-        return send(response, 200, {
-          scouts: rows.map((row) => ({
-            id: row.id,
-            name: row.name,
-            age: row.age,
-            unit: row.unit,
-            phone: row.phone,
-            guardian: row.guardian,
-            joinedAt: row.joined_at,
-            status: row.status,
-            createdAt: row.created_at,
-            updatedAt: row.updated_at,
-          })),
-        });
-      } catch (error) {
-        console.error(error);
-
-        return send(response, 500, {
-          error: error.message,
-        });
-      }
+      return send(response, 200, { units });
     }
 
     if (request.method === "GET" && path === "/api/auth/setup-status") {
-      return send(response, 200, { setupRequired: readStore().users.length === 0 });
+      const [rows] = await db.execute("SELECT COUNT(*) AS total FROM users");
+      return send(response, 200, { setupRequired: Number(rows[0]?.total || 0) === 0 });
     }
 
     if (request.method === "POST" && path === "/api/auth/setup") {
-      const store = readStore();
-      if (store.users.length > 0) {
+      const [existingUsers] = await db.execute("SELECT COUNT(*) AS total FROM users");
+      if (Number(existingUsers[0]?.total || 0) > 0) {
         return send(response, 409, { error: "ScoutOS has already been set up." });
       }
 
       const validation = validateAccount(await readJson(request), true);
       if (validation.error) return send(response, 400, { error: validation.error });
 
+      const passwordHash = hashPassword(validation.value.password);
+      const [result] = await db.execute(
+        `
+          INSERT INTO users
+            (full_name, username, password_hash, role, unit, active, created_at)
+          VALUES (?, ?, ?, ?, ?, 1, NOW())
+        `,
+        [
+          validation.value.fullName,
+          validation.value.username,
+          passwordHash,
+          validation.value.role,
+          validation.value.unit,
+        ],
+      );
+
       const user = {
-        id: randomUUID(),
-        ...validation.value,
-        passwordHash: hashPassword(validation.value.password),
-        password: undefined,
+        id: result.insertId,
+        fullName: validation.value.fullName,
+        username: validation.value.username,
+        role: validation.value.role,
+        unit: validation.value.unit,
         active: true,
         createdAt: new Date().toISOString(),
       };
-      delete user.password;
-      store.users.push(user);
-      writeStore(store);
 
       return send(response, 201, { token: signToken(user), user: publicUser(user) });
     }
@@ -379,7 +367,7 @@ const server = createServer(async (request, response) => {
         fullName: account.full_name,
         username: account.username,
         role: account.role,
-        unit: account.unit_id,
+        unit: account.unit ?? account.unit_id ?? null,
         active: Boolean(account.active),
         createdAt: account.created_at,
       };
@@ -411,7 +399,12 @@ const server = createServer(async (request, response) => {
       if (!["ADMIN", "GROUP_LEADER"].includes(user.role)) {
         return send(response, 403, { error: "You do not have permission to view users." });
       }
-      return send(response, 200, { users: readStore().users.map(publicUser) });
+
+      const [rows] = await db.execute(
+        "SELECT id, full_name, username, role, unit, active, created_at FROM users ORDER BY created_at DESC"
+      );
+
+      return send(response, 200, { users: rows.map(publicUser) });
     }
 
     if (path === "/api/users" && request.method === "POST") {
@@ -419,24 +412,43 @@ const server = createServer(async (request, response) => {
         return send(response, 403, { error: "Only an Admin can create user accounts." });
       }
 
-      const store = readStore();
       const validation = validateAccount(await readJson(request));
       if (validation.error) return send(response, 400, { error: validation.error });
-      if (store.users.some((candidate) => candidate.username === validation.value.username)) {
+
+      const [existingRows] = await db.execute(
+        "SELECT id FROM users WHERE username = ? LIMIT 1",
+        [validation.value.username],
+      );
+
+      if (existingRows.length > 0) {
         return send(response, 409, { error: "That username is already in use." });
       }
 
+      const [result] = await db.execute(
+        `
+          INSERT INTO users
+            (full_name, username, password_hash, role, unit, active, created_at)
+          VALUES (?, ?, ?, ?, ?, 1, NOW())
+        `,
+        [
+          validation.value.fullName,
+          validation.value.username,
+          hashPassword(validation.value.password),
+          validation.value.role,
+          validation.value.unit,
+        ],
+      );
+
       const newUser = {
-        id: randomUUID(),
-        ...validation.value,
-        passwordHash: hashPassword(validation.value.password),
-        password: undefined,
+        id: result.insertId,
+        fullName: validation.value.fullName,
+        username: validation.value.username,
+        role: validation.value.role,
+        unit: validation.value.unit,
         active: true,
         createdAt: new Date().toISOString(),
       };
-      delete newUser.password;
-      store.users.push(newUser);
-      writeStore(store);
+
       return send(response, 201, { user: publicUser(newUser) });
     }
     if (path === "/api/scouts" && request.method === "GET") {
