@@ -1161,10 +1161,9 @@ select:disabled {
   border-color: #7fa88f;
   box-shadow: 0 0 0 3px rgba(51, 120, 90, 0.08);
 }
-
 .attendance-summary-grid {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
   gap: 12px;
   margin-bottom: 20px;
 }
@@ -1470,7 +1469,7 @@ select:disabled {
   }
 
   .attendance-summary-grid {
-    grid-template-columns: repeat(3, 1fr);
+    grid-template-columns: repeat(2, 1fr);
   }
 
   .attendance-scout-row {
@@ -1648,4 +1647,4 @@ select:disabled {
   .form-actions .button {
     width: 100%;
   }
-}
+} 
