@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Photos | Projectify GJU</title>
+  <meta name="description" content="Projectify GJU photo gallery for events, workshops, projects, and community moments." />
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div class="site-glow site-glow-one"></div>
+  <div class="site-glow site-glow-two"></div>
+
+  <header class="nav-shell">
+    <nav class="navbar" aria-label="Primary navigation">
+      <a class="brand" href="index.html">
+        <span class="brand-mark">P</span>
+        <span>
+          <strong>Projectify</strong>
+          <small>GJU</small>
+        </span>
+      </a>
+
+      <button class="nav-toggle" type="button" aria-label="Open navigation" aria-expanded="false">
+        <span></span>
+        <span></span>
+        <span></span>
+      </button>
+
+      <div class="nav-links" data-nav-links>
+        <a href="index.html">Home</a>
+        <a href="about.html">About</a>
+        <a href="board.html">Board</a>
+        <a href="events.html">Events</a>
+        <a href="projects.html">Projects</a>
+        <a href="photos.html">Photos</a>
+        <a href="contact.html">Contact</a>
+      </div>
+    </nav>
+  </header>
+
+  <main>
+    <section class="section page-hero">
+      <div class="page-hero-grid">
+        <div class="reveal">
+          <p class="eyebrow">Gallery</p>
+          <h1>Projectify in photos.</h1>
+          <p class="page-intro">A visual archive of our events, project nights, workshops, teams, and community moments.</p>
+        </div>
+        <div class="page-visual photo-hero-card reveal" aria-hidden="true">
+          <div class="photo-stack">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section reveal">
+      <div class="section-heading row-heading">
+        <div>
+          <p class="eyebrow">All Photos</p>
+          <h2>Events, people, and projects.</h2>
+        </div>
+        <span class="photo-count" data-photo-count>0 photos</span>
+      </div>
+
+      <div class="photo-gallery" data-photo-gallery>
+        <article class="gallery-empty" data-gallery-empty>
+          <h3>Photos will appear here soon.</h3>
+          <p>Add image files to the gallery folder and this page will display them in the same Projectify style.</p>
+        </article>
+      </div>
+    </section>
+  </main>
+
+  <div class="lightbox" data-lightbox aria-hidden="true">
+    <button class="lightbox-close" type="button" data-lightbox-close aria-label="Close photo">×</button>
+    <img src="" alt="" data-lightbox-image />
+  </div>
+
+  <footer class="footer">
+    <div>
+      <a class="brand footer-brand" href="index.html">
+        <span class="brand-mark">P</span>
+        <span><strong>Projectify</strong><small>GJU</small></span>
+      </a>
+      <p>Student-led innovation at German Jordanian University.</p>
+    </div>
+    <div class="social-links" aria-label="Social media links">
+      <a href="https://www.instagram.com/projectifygju/" target="_blank" rel="noreferrer">Instagram</a>
+      <a href="https://www.linkedin.com/company/projectify-gju/" target="_blank" rel="noreferrer">LinkedIn</a>
+      <a href="mailto:projectify.DSA@gju.edu.jo">Email</a>
+    </div>
+  </footer>
+
+  <script>
+    // Add custom photo filenames here when your images do not use photo-01.jpg style names.
+    window.projectifyPhotos = [
+      // "assets/photos/example.jpg"
+    ];
+  </script>
+  <script src="script.js"></script>
+</body>
+</html>
