@@ -318,6 +318,13 @@ export const api = {
         method: "POST",
         body: JSON.stringify(input),
       }),
+    update: (id: string, input: any) =>
+      request<{ user: AuthUser }>(`/users/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(input),
+      }),
+    remove: (id: string) =>
+      request<void>(`/users/${id}`, { method: "DELETE" }),
   },
 
   attendance: {
