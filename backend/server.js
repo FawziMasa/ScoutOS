@@ -750,7 +750,14 @@ const server = createServer(async (request, response) => {
       }
 
       if (request.method === "PUT") {
-        const validation = validateScout(await readJson(request));
+        const payload = await readJson(request);
+
+        // Preserve existing join_date if not provided or empty in payload
+        if (!payload.joinedAt || payload.joinedAt === "") {
+          payload.joinedAt = scout.joined_at;
+        }
+
+        const validation = validateScout(payload);
 
         if (validation.error) {
           return send(response, 400, {
@@ -760,7 +767,7 @@ const server = createServer(async (request, response) => {
 
         await db.execute(
           `UPDATE scouts
-       SET name=?,
+        SET name=?,
            age=?,
            unit=?,
            phone=?,
@@ -768,7 +775,7 @@ const server = createServer(async (request, response) => {
            joined_at=?,
            status=?,
            updated_at=?
-       WHERE id=?`,
+        WHERE id=?`,
           [
             validation.value.name,
             validation.value.age,

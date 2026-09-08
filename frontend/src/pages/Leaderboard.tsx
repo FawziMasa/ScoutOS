@@ -37,19 +37,27 @@ function Leaderboard() {
                             </tr>
                         </thead>
                         <tbody>
-                            {entries.map((entry, index) => (
-                                <tr key={entry.scoutId}>
-                                    <td>{index + 1}</td>
-                                    <td>
-                                        <div className="person-cell">
-                                            <span className="person-avatar">{entry.name.split(" ").map((part) => part[0]).slice(0, 2).join("")}</span>
-                                            <strong>{entry.name}</strong>
-                                        </div>
-                                    </td>
-                                    <td><span className="unit-pill" dir="rtl">{entry.unit}</span></td>
-                                    <td><strong>{entry.totalPoints}</strong></td>
-                                </tr>
-                            ))}
+                            {entries && entries.length > 0 ? (
+                                entries.map((entry, index) => (
+                                    <tr key={entry.scoutId || index}>
+                                        <td>{index + 1}</td>
+                                        <td>
+                                            <div className="person-cell">
+                                                <span className="person-avatar">{entry.name?.split(" ").map((part) => part[0]).slice(0, 2).join("") || "??"}</span>
+                                                <strong>{entry.name || "Unknown Scout"}</strong>
+                                            </div>
+                                        </td>
+                                        <td><span className="unit-pill" dir="rtl">{entry.unit || "-"}</span></td>
+                                        <td><strong>{entry.totalPoints ?? 0}</strong></td>
+                                    </tr>
+                                ))
+                            ) : (
+                                !loading && (
+                                    <tr>
+                                        <td colSpan={4} style={{textAlign: 'center', padding: '20px'}}>No leaderboard data available.</td>
+                                    </tr>
+                                )
+                            )}
                         </tbody>
                     </table>
 
