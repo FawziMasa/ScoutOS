@@ -12,6 +12,7 @@ import Login from "./pages/Login";
 import Register from "./pages/Register";
 import ResetPassword from "./pages/ResetPassword";
 import Scouts from "./pages/Scouts";
+import Users from "./pages/Users";
 import { getToken } from "./lib/api";
 
 function ProtectedRoute() {
@@ -34,6 +35,7 @@ function App() {
           <Route path="/events" element={<Events />} />
           <Route path="/attendance" element={<Attendance />} />
           <Route path="/attendance-history" element={<AttendanceHistory />} />
+          <Route path="/users" element={<Users />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

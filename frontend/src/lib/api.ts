@@ -311,6 +311,15 @@ export const api = {
       request<void>(`/scouts/${id}`, { method: "DELETE" }),
   },
 
+  users: {
+    list: () => request<{ users: AuthUser[] }>("/users"),
+    create: (input: any) =>
+      request<{ user: AuthUser }>("/users", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+  },
+
   attendance: {
     sessions: {
       list: () => request<{ sessions: AttendanceSession[] }>("/attendance/sessions"),

@@ -1,5 +1,6 @@
 import { NavLink } from "react-router-dom";
 import Icon from "./Icon";
+import { getStoredUser } from "../lib/api";
 
 const links = [
   { path: "/dashboard", label: "Overview", icon: "dashboard" as const },
@@ -15,6 +16,9 @@ type SidebarProps = {
 };
 
 function Sidebar({ open, onClose }: SidebarProps) {
+  const user = getStoredUser();
+  const isAdmin = user?.role === "ADMIN";
+
   return (
     <>
       <button
@@ -51,7 +55,21 @@ function Sidebar({ open, onClose }: SidebarProps) {
               <Icon name="chevron" size={15} />
             </NavLink>
           ))}
+          {isAdmin && (
+            <NavLink
+              to="/users"
+              onClick={onClose}
+              className={({ isActive }) =>
+                `sidebar-link ${isActive ? "active" : ""}`
+              }
+            >
+              <Icon name="users" />
+              <span>Manage Leaders</span>
+              <Icon name="chevron" size={15} />
+            </NavLink>
+          )}
         </nav>
+
 
         <div className="sidebar-card">
           <span className="sidebar-card-icon">
