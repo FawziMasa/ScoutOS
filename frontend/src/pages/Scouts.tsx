@@ -49,14 +49,40 @@ function Scouts() {
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState("");
     const [scoutPoints, setScoutPoints] = useState<PointsTransaction[]>([]);
+    const [pointsChange, setPointsChange] = useState<string>("");
+    const [pointsReason, setPointsReason] = useState<string>("");
+    const [submittingPoints, setSubmittingPoints] = useState(false);
 
     useEffect(() => {
         api.scouts.list()
             .then(({ scouts: records }) => {
-                console.log("RECORDS:", records);
                 setScouts(records);
             }).catch((loadError) => { setError(loadError instanceof Error ? loadError.message : "Could not load scouts."); }).finally(() => setLoading(false));
     }, []);
+
+    const fetchPointsHistory = (scoutId: string) => {
+        api.points.history(scoutId).then(({ transactions }) => {
+            setScoutPoints(transactions);
+        }).catch(() => setScoutPoints([]));
+    };
+
+    const handlePointsSubmit = async (event: FormEvent) => {
+        event.preventDefault();
+        if (!editingId || !pointsChange || !pointsReason) return;
+        
+        try {
+            setSubmittingPoints(true);
+            await api.points.add(editingId, parseInt(pointsChange), pointsReason);
+            setPointsChange("");
+            setPointsReason("");
+            fetchPointsHistory(editingId);
+        } catch (err) {
+            alert(err instanceof Error ? err.message : "Failed to update points.");
+        } finally {
+            setSubmittingPoints(false);
+        }
+    };
+
     const filteredScouts = useMemo(() => {
         const query = search.trim().toLowerCase();
         return scouts.filter((scout) => {
@@ -89,9 +115,7 @@ function Scouts() {
         });
         setError("");
         setModalOpen(true);
-        api.points.history(scout.id).then(({ transactions }) => {
-            setScoutPoints(transactions);
-        }).catch(() => setScoutPoints([]));
+        fetchPointsHistory(scout.id);
     };
 
     const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -293,6 +317,17 @@ function Scouts() {
                                             </li>
                                         ))}
                                     </ul>
+                                    
+                                    <div style={{marginTop: '15px', padding: '10px', background: '#f9f9f9', borderRadius: '5px'}}>
+                                        <h4>Award / Deduct Points</h4>
+                                        <div style={{display: 'flex', gap: '10px', marginBottom: '10px'}}>
+                                            <input type="number" placeholder="Points (+/-)" value={pointsChange} onChange={e => setPointsChange(e.target.value)} style={{flex: 1}} />
+                                            <input type="text" placeholder="Reason" value={pointsReason} onChange={e => setPointsReason(e.target.value)} style={{flex: 2}} />
+                                            <button className="button button-primary" onClick={handlePointsSubmit} disabled={submittingPoints}>
+                                                {submittingPoints ? "…" : "Submit"}
+                                            </button>
+                                        </div>
+                                    </div>
                                 </div>
                             )}
 
