@@ -5,6 +5,7 @@ import {
     api,
     getStoredUser,
     scoutUnits,
+    type PointsTransaction,
     type Scout,
     type ScoutInput,
     type ScoutStatus,
@@ -47,6 +48,7 @@ function Scouts() {
     const [loading, setLoading] = useState(true);
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState("");
+    const [scoutPoints, setScoutPoints] = useState<PointsTransaction[]>([]);
 
     useEffect(() => {
         api.scouts.list()
@@ -87,6 +89,9 @@ function Scouts() {
         });
         setError("");
         setModalOpen(true);
+        api.points.history(scout.id).then(({ transactions }) => {
+            setScoutPoints(transactions);
+        }).catch(() => setScoutPoints([]));
     };
 
     const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -276,6 +281,20 @@ function Scouts() {
                                     <option>Active</option><option>Inactive</option>
                                 </select>
                             </label>
+
+                            {editingId && (
+                                <div className="field-wide" style={{marginTop: '20px', borderTop: '1px solid #eee', paddingTop: '10px'}}>
+                                    <h3>Points History ({scoutPoints.reduce((sum, t) => sum + t.points, 0)})</h3>
+                                    <ul style={{listStyle: 'none', padding: 0, maxHeight: '200px', overflowY: 'auto'}}>
+                                        {scoutPoints.map(t => (
+                                            <li key={t.id} style={{display: 'flex', justifyContent: 'space-between', padding: '5px 0'}}>
+                                                <span>{t.reason}</span>
+                                                <strong>{t.points > 0 ? `+${t.points}` : t.points}</strong>
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
 
                             <div className="form-actions field-wide">
                                 <button className="button button-secondary" disabled={saving} type="button" onClick={() => setModalOpen(false)}>Cancel</button>

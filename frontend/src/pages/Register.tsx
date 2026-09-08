@@ -10,6 +10,7 @@ function Register() {
   const [form, setForm] = useState({
     fullName: "",
     username: "",
+    email: "",
     password: "",
     confirmPassword: "",
   });
@@ -47,6 +48,7 @@ function Register() {
       const result = await api.setup({
         fullName: form.fullName,
         username: form.username,
+        email: form.email,
         password: form.password,
       });
       saveSession(result.token, result.user, true);
@@ -99,6 +101,10 @@ function Register() {
                   <span>Username</span>
                   <input autoComplete="username" value={form.username} onChange={(event) => update("username", event.target.value)} placeholder="Choose an admin username" />
                 </label>
+                <label className="field field-wide">
+                  <span>Email address</span>
+                  <input autoComplete="email" type="email" value={form.email} onChange={(event) => update("email", event.target.value)} placeholder="admin@example.com" />
+                </label>
                 <label className="field">
                   <span>Password</span>
                   <input autoComplete="new-password" type="password" value={form.password} onChange={(event) => update("password", event.target.value)} placeholder="At least 8 characters" />
@@ -116,7 +122,7 @@ function Register() {
             </>
           )}
 
-          <p className="auth-switch"><Link to="/">← Back to sign in</Link></p>
+          <p className="auth-switch"><Link to="/">Back to sign in</Link></p>
         </form>
       </section>
     </main>

@@ -1,4 +1,5 @@
 import mysql from "mysql2/promise";
+import { connect as createSocket } from "node:net";
 import "../config/env.js";
 
 function connectionFromUrl() {
@@ -26,6 +27,7 @@ const envConnection = {
 };
 
 const connection = urlConnection || envConnection;
+const fallbackHost = process.env.DB_HOST_FALLBACK;
 const requiredVariables = ["host", "user", "password", "database"];
 
 for (const variable of requiredVariables) {
@@ -42,6 +44,10 @@ const db = mysql.createPool({
     user: connection.user,
     password: connection.password,
     database: connection.database,
+    // Preserve the Aiven hostname for TLS while bypassing a broken local DNS resolver.
+    stream: fallbackHost
+        ? () => createSocket({ host: fallbackHost, port: connection.port })
+        : undefined,
 
     charset: "utf8mb4",
     ssl: process.env.DB_SSL === "true"

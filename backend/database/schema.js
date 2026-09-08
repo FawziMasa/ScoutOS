@@ -1,5 +1,8 @@
 import db from "./db.js";
 import { ensureAttendanceSchema } from "./attendanceMigration.js";
+import { ensureEventSchema } from "./eventMigration.js";
+import { ensurePasswordResetSchema } from "./passwordResetMigration.js";
+import { ensurePointsSchema } from "./pointsMigration.js";
 
 async function tableExists(tableName) {
   const [rows] = await db.execute(
@@ -32,19 +35,38 @@ async function columnExists(tableName, columnName) {
   return rows.length > 0;
 }
 
+async function indexExists(tableName, indexName) {
+  const [rows] = await db.execute(
+    `
+      SELECT index_name
+      FROM information_schema.statistics
+      WHERE table_schema = DATABASE()
+        AND table_name = ?
+        AND index_name = ?
+      LIMIT 1
+    `,
+    [tableName, indexName],
+  );
+
+  return rows.length > 0;
+}
+
 async function ensureUsersTable() {
   await db.execute(`
     CREATE TABLE IF NOT EXISTS users (
       id INT NOT NULL AUTO_INCREMENT,
       full_name VARCHAR(100) NOT NULL,
       username VARCHAR(50) NOT NULL,
+      email VARCHAR(254) NULL,
       password_hash VARCHAR(255) NOT NULL,
       role VARCHAR(20) NOT NULL DEFAULT 'UNIT_LEADER',
       unit VARCHAR(50) NULL,
       active TINYINT(1) NOT NULL DEFAULT 1,
+      session_version INT NOT NULL DEFAULT 0,
       created_at DATETIME NULL,
       PRIMARY KEY (id),
-      UNIQUE KEY uq_users_username (username)
+      UNIQUE KEY uq_users_username (username),
+      UNIQUE KEY uq_users_email (email)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
   `);
 
@@ -52,8 +74,20 @@ async function ensureUsersTable() {
     await db.execute("ALTER TABLE users ADD COLUMN unit VARCHAR(50) NULL AFTER role");
   }
 
+  if (!(await columnExists("users", "email"))) {
+    await db.execute("ALTER TABLE users ADD COLUMN email VARCHAR(254) NULL AFTER username");
+  }
+
+  if (!(await indexExists("users", "uq_users_email"))) {
+    await db.execute("ALTER TABLE users ADD UNIQUE KEY uq_users_email (email)");
+  }
+
   if (!(await columnExists("users", "active"))) {
     await db.execute("ALTER TABLE users ADD COLUMN active TINYINT(1) NOT NULL DEFAULT 1");
+  }
+
+  if (!(await columnExists("users", "session_version"))) {
+    await db.execute("ALTER TABLE users ADD COLUMN session_version INT NOT NULL DEFAULT 0 AFTER active");
   }
 
   if (!(await columnExists("users", "created_at"))) {
@@ -111,4 +145,7 @@ export async function ensureCoreSchema() {
   }
 
   await ensureAttendanceSchema();
+  await ensureEventSchema();
+  await ensurePasswordResetSchema();
+  await ensurePointsSchema();
 }

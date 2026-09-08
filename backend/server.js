@@ -18,6 +18,21 @@ import { fileURLToPath } from "node:url";
 import { ensureCoreSchema } from "./database/schema.js";
 import db from "./database/db.js";
 import { handleAttendanceRoute } from "./routes/attendance.js";
+import { handleEventRoute } from "./routes/events.js";
+import { handlePointsRoute } from "./routes/points.js";
+import { sendPasswordResetEmail } from "./services/emailService.js";
+import {
+  buildPasswordResetUrl,
+  createPasswordResetToken,
+  hashPasswordResetToken,
+  hashRateLimitValue,
+  isValidPasswordResetToken,
+  normalizeEmail,
+  PASSWORD_RESET_EMAIL_LIMIT,
+  PASSWORD_RESET_IP_LIMIT,
+  PASSWORD_RESET_TOKEN_TTL_MINUTES,
+  validateResetPassword,
+} from "./services/passwordResetService.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dataDirectory = process.env.DATA_DIR
@@ -38,11 +53,15 @@ if (!existsSync(storePath)) {
   writeFileSync(storePath, JSON.stringify({ users: [], scouts: [] }, null, 2));
 }
 
-if (!existsSync(secretPath)) {
-  writeFileSync(secretPath, randomBytes(48).toString("hex"));
+let tokenSecret = process.env.JWT_SECRET || process.env.APP_SECRET;
+if (!tokenSecret) {
+    if (existsSync(secretPath)) {
+        tokenSecret = readFileSync(secretPath, "utf8").trim();
+    } else {
+        tokenSecret = randomBytes(48).toString("hex");
+        writeFileSync(secretPath, tokenSecret);
+    }
 }
-
-const tokenSecret = readFileSync(secretPath, "utf8").trim();
 
 await ensureCoreSchema().catch((error) => {
   console.error("Database schema check failed:", error);
@@ -146,6 +165,7 @@ function signToken(user) {
     sub: user.id,
     role: user.role,
     unit: user.unit,
+    sessionVersion: Number(user.sessionVersion ?? user.session_version ?? 0),
     expiresAt: Date.now() + 12 * 60 * 60 * 1000,
   });
   const signature = createHmac("sha256", tokenSecret)
@@ -203,7 +223,12 @@ async function authenticate(request) {
     [claims.sub]
   );
 
-  return rows[0] ? publicUser(rows[0]) : null;
+  const account = rows[0];
+  if (!account || Number(claims.sessionVersion ?? 0) !== Number(account.session_version ?? 0)) {
+    return null;
+  }
+
+  return publicUser(account);
 }
 
 function canAccessScout(user, scout) {
@@ -217,6 +242,7 @@ function canAccessScout(user, scout) {
 function validateAccount(body, firstAccount = false) {
   const fullName = String(body.fullName || "").trim();
   const username = String(body.username || "").trim().toLowerCase();
+  const email = normalizeEmail(body.email);
   const password = String(body.password || "");
   const role = firstAccount ? "ADMIN" : String(body.role || "");
   const unit = role === "UNIT_LEADER" ? String(body.unit || "") : null;
@@ -225,13 +251,29 @@ function validateAccount(body, firstAccount = false) {
   if (!/^[a-zA-Z0-9._-]{3,30}$/.test(username)) {
     return { error: "Username must be 3-30 letters, numbers, dots, dashes, or underscores." };
   }
+  if (!email) return { error: "A valid email address is required." };
   if (password.length < 8) return { error: "Password must be at least 8 characters." };
   if (!roles.includes(role)) return { error: "Invalid role." };
   if (role === "UNIT_LEADER" && !units.includes(unit)) {
     return { error: "A Unit Leader must be assigned to a valid unit." };
   }
 
-  return { value: { fullName, username, password, role, unit } };
+  return { value: { fullName, username, email, password, role, unit } };
+}
+
+function requestIp(request) {
+  const forwarded = request.headers["x-forwarded-for"];
+  if (typeof forwarded === "string" && forwarded.trim()) {
+    return forwarded.split(",")[0].trim().slice(0, 128);
+  }
+
+  return String(request.socket.remoteAddress || "unknown").slice(0, 128);
+}
+
+function passwordResetResponse(response) {
+  return send(response, 202, {
+    message: "If an account matches that email, a reset link will arrive shortly.",
+  });
 }
 
 function validateScout(body) {
@@ -310,12 +352,13 @@ const server = createServer(async (request, response) => {
       const [result] = await db.execute(
         `
           INSERT INTO users
-            (full_name, username, password_hash, role, unit, active, created_at)
-          VALUES (?, ?, ?, ?, ?, 1, NOW())
+            (full_name, username, email, password_hash, role, unit, active, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, 1, NOW())
         `,
         [
           validation.value.fullName,
           validation.value.username,
+          validation.value.email,
           passwordHash,
           validation.value.role,
           validation.value.unit,
@@ -333,6 +376,162 @@ const server = createServer(async (request, response) => {
       };
 
       return send(response, 201, { token: signToken(user), user: publicUser(user) });
+    }
+
+    if (request.method === "POST" && path === "/api/auth/forgot-password") {
+      const body = await readJson(request);
+      const normalizedEmail = normalizeEmail(body.email);
+      const rateLimitSecret = process.env.PASSWORD_RESET_RATE_LIMIT_SECRET || tokenSecret;
+      const identifierValue = normalizedEmail || String(body.email || "").slice(0, 254);
+      const identifierHash = hashRateLimitValue(identifierValue, rateLimitSecret);
+      const ipHash = hashRateLimitValue(requestIp(request), rateLimitSecret);
+      let connection;
+      let delivery;
+
+      try {
+        connection = await db.getConnection();
+        await connection.beginTransaction();
+        await connection.execute(
+          "DELETE FROM password_reset_rate_limits WHERE created_at < DATE_SUB(NOW(), INTERVAL 24 HOUR)",
+        );
+
+        const [emailRequests] = await connection.execute(
+          `
+            SELECT id FROM password_reset_rate_limits
+            WHERE identifier_hash = ?
+              AND created_at > DATE_SUB(NOW(), INTERVAL 1 HOUR)
+            FOR UPDATE
+          `,
+          [identifierHash],
+        );
+        const [ipRequests] = await connection.execute(
+          `
+            SELECT id FROM password_reset_rate_limits
+            WHERE ip_hash = ?
+              AND created_at > DATE_SUB(NOW(), INTERVAL 1 HOUR)
+            FOR UPDATE
+          `,
+          [ipHash],
+        );
+
+        if (
+          emailRequests.length < PASSWORD_RESET_EMAIL_LIMIT &&
+          ipRequests.length < PASSWORD_RESET_IP_LIMIT
+        ) {
+          await connection.execute(
+            `
+              INSERT INTO password_reset_rate_limits (identifier_hash, ip_hash, created_at)
+              VALUES (?, ?, NOW())
+            `,
+            [identifierHash, ipHash],
+          );
+
+          if (normalizedEmail) {
+            const [accounts] = await connection.execute(
+              "SELECT id, email FROM users WHERE email = ? AND active = 1 LIMIT 1 FOR UPDATE",
+              [normalizedEmail],
+            );
+            const account = accounts[0];
+
+            if (account) {
+              const { token, tokenHash } = createPasswordResetToken();
+              await connection.execute(
+                "UPDATE password_reset_tokens SET used_at = NOW() WHERE user_id = ? AND used_at IS NULL",
+                [account.id],
+              );
+              await connection.execute(
+                `
+                  INSERT INTO password_reset_tokens (user_id, token_hash, expires_at, created_at)
+                  VALUES (?, ?, DATE_ADD(NOW(), INTERVAL ${PASSWORD_RESET_TOKEN_TTL_MINUTES} MINUTE), NOW())
+                `,
+                [account.id, tokenHash],
+              );
+              delivery = { userId: account.id, email: account.email, token, tokenHash };
+            }
+          }
+        }
+
+        await connection.commit();
+      } catch {
+        if (connection) await connection.rollback();
+        return passwordResetResponse(response);
+      } finally {
+        connection?.release();
+      }
+
+      if (delivery) {
+        try {
+          await sendPasswordResetEmail({
+            to: delivery.email,
+            resetUrl: buildPasswordResetUrl(process.env.FRONTEND_URL || allowedOrigin, delivery.token),
+          });
+        } catch {
+          await db.execute(
+            "DELETE FROM password_reset_tokens WHERE user_id = ? AND token_hash = ? AND used_at IS NULL",
+            [delivery.userId, delivery.tokenHash],
+          );
+          console.error("Password reset email delivery failed.");
+        }
+      }
+
+      return passwordResetResponse(response);
+    }
+
+    if (request.method === "POST" && path === "/api/auth/reset-password") {
+      const body = await readJson(request);
+      const token = String(body.token || "");
+      const password = String(body.password || "");
+      const confirmPassword = String(body.confirmPassword || "");
+      const passwordError = validateResetPassword(password);
+
+      if (password !== confirmPassword) {
+        return send(response, 400, { error: "Passwords do not match." });
+      }
+      if (passwordError) return send(response, 400, { error: passwordError });
+      if (!isValidPasswordResetToken(token)) {
+        return send(response, 400, { error: "This reset link is invalid or has expired." });
+      }
+
+      const tokenHash = hashPasswordResetToken(token);
+      const connection = await db.getConnection();
+
+      try {
+        await connection.beginTransaction();
+        const [tokens] = await connection.execute(
+          `
+            SELECT id, user_id FROM password_reset_tokens
+            WHERE token_hash = ?
+              AND used_at IS NULL
+              AND expires_at > NOW()
+            LIMIT 1
+            FOR UPDATE
+          `,
+          [tokenHash],
+        );
+        const resetToken = tokens[0];
+
+        if (!resetToken) {
+          await connection.rollback();
+          return send(response, 400, { error: "This reset link is invalid or has expired." });
+        }
+
+        await connection.execute(
+          "UPDATE users SET password_hash = ?, session_version = session_version + 1 WHERE id = ?",
+          [hashPassword(password), resetToken.user_id],
+        );
+        await connection.execute(
+          "UPDATE password_reset_tokens SET used_at = NOW() WHERE user_id = ? AND used_at IS NULL",
+          [resetToken.user_id],
+        );
+        await connection.commit();
+      } catch (error) {
+        await connection.rollback();
+        throw error;
+      } finally {
+        connection.release();
+      }
+
+      return send(response, 200, { message: "Your password has been reset. You can now sign in." });
     }
 
     if (request.method === "POST" && path === "/api/auth/login") {
@@ -369,6 +568,7 @@ const server = createServer(async (request, response) => {
         role: account.role,
         unit: account.unit ?? account.unit_id ?? null,
         active: Boolean(account.active),
+        sessionVersion: Number(account.session_version ?? 0),
         createdAt: account.created_at,
       };
 
@@ -395,6 +595,26 @@ const server = createServer(async (request, response) => {
 
     if (attendanceHandled) return;
 
+    const eventsHandled = await handleEventRoute(request, response, {
+      path,
+      user,
+      send,
+      sendNoContent,
+      readJson,
+    });
+
+    if (eventsHandled) return;
+
+    const pointsHandled = await handlePointsRoute(request, response, {
+      path,
+      user,
+      send,
+      sendNoContent,
+      readJson,
+    });
+
+    if (pointsHandled) return;
+
     if (path === "/api/users" && request.method === "GET") {
       if (!["ADMIN", "GROUP_LEADER"].includes(user.role)) {
         return send(response, 403, { error: "You do not have permission to view users." });
@@ -416,23 +636,24 @@ const server = createServer(async (request, response) => {
       if (validation.error) return send(response, 400, { error: validation.error });
 
       const [existingRows] = await db.execute(
-        "SELECT id FROM users WHERE username = ? LIMIT 1",
-        [validation.value.username],
+        "SELECT id FROM users WHERE username = ? OR email = ? LIMIT 1",
+        [validation.value.username, validation.value.email],
       );
 
       if (existingRows.length > 0) {
-        return send(response, 409, { error: "That username is already in use." });
+        return send(response, 409, { error: "That username or email address is already in use." });
       }
 
       const [result] = await db.execute(
         `
           INSERT INTO users
-            (full_name, username, password_hash, role, unit, active, created_at)
-          VALUES (?, ?, ?, ?, ?, 1, NOW())
+            (full_name, username, email, password_hash, role, unit, active, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, 1, NOW())
         `,
         [
           validation.value.fullName,
           validation.value.username,
+          validation.value.email,
           hashPassword(validation.value.password),
           validation.value.role,
           validation.value.unit,

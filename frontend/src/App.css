@@ -872,6 +872,24 @@ tbody tr:last-child td {
   color: var(--danger);
 }
 
+.events-table-wrap table { min-width: 980px; }
+.event-title-cell { display: flex; gap: 11px; align-items: center; }
+.event-title-cell > div { display: flex; flex-direction: column; gap: 3px; }
+.event-title-cell span, .event-subtle { color: var(--muted); font-size: 10px; }
+.event-calendar-icon { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 8px; color: var(--forest-700); background: var(--sage-100); }
+.registration-button { border: 0; color: var(--forest-700); background: transparent; cursor: pointer; font: inherit; font-weight: 800; }
+.registration-button:hover { color: var(--gold-700); }
+.registration-modal { width: min(650px, 100%); }
+.registration-caption { margin-top: 7px; color: var(--muted); font-size: 12px; }
+.registration-search { width: 100%; margin-bottom: 14px; }
+.registration-list { display: flex; max-height: min(48vh, 420px); margin-bottom: 20px; gap: 8px; overflow-y: auto; flex-direction: column; }
+.registration-row { display: grid; grid-template-columns: auto 34px minmax(0, 1fr) auto; min-height: 58px; padding: 10px 12px; gap: 11px; align-items: center; border: 1px solid var(--line); border-radius: 8px; background: white; cursor: pointer; }
+.registration-row.selected { border-color: #a9c3b1; background: var(--sage-50); }
+.registration-row input { width: 16px; height: 16px; accent-color: var(--forest-700); }
+.registration-row > span:nth-of-type(2) { display: flex; min-width: 0; flex-direction: column; }
+.registration-row strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.registration-row small { margin-top: 3px; color: var(--muted); font-size: 10px; }
+
 .empty-state {
   padding: 55px 20px;
   text-align: center;

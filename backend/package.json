@@ -3,13 +3,18 @@
   "version": "1.0.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "node --watch server.js",
     "start": "node server.js",
     "migrate": "node scripts/migrate.js",
-    "check": "node --check server.js"
+    "check": "node --check server.js && node --check services/passwordResetService.js && node --check services/emailService.js",
+    "test": "node --test"
   },
   "dependencies": {
-    "mysql2": "^3.22.5"
+    "mysql2": "^3.22.5",
+    "nodemailer": "^10.0.1"
   }
 }

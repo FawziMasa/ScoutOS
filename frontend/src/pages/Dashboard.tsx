@@ -2,49 +2,54 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import Icon from "../components/Icon";
 import { api, getStoredUser } from "../lib/api";
+
 function Dashboard() {
     const user = getStoredUser();
-    const [counts, setCounts] = useState({ total: 0, active: 0 });
-    useEffect(() => {
-        api.scouts.list()
-            .then(({ scouts }) => {
-                console.log("DASHBOARD SCOUTS:", scouts);
+    const [counts, setCounts] = useState({ totalScouts: 0, activeScouts: 0, events: 0, attendanceRate: 0 });
 
-                setCounts({
-                    total: scouts.length,
-                    active: scouts.filter(
-                        (scout) => scout.status === "Active"
-                    ).length,
-                });
-            })
-            .catch((err) => {
-                console.error("DASHBOARD ERROR:", err);
-                setCounts({
-                    total: 0,
-                    active: 0,
-                });
+    useEffect(() => {
+        Promise.all([
+            api.scouts.list(),
+            api.events.list(),
+            api.attendance.sessions.list()
+        ]).then(([scoutData, eventData, attendanceData]) => {
+            const scouts = scoutData.scouts;
+            const events = eventData.events;
+            const sessions = attendanceData.sessions;
+
+            const presentTotal = sessions.reduce((sum, s) => sum + s.summary.present + s.summary.late, 0);
+            const attendanceTotal = sessions.reduce((sum, s) => sum + s.summary.totalScouts, 0);
+            
+            setCounts({
+                totalScouts: scouts.length,
+                activeScouts: scouts.filter((s) => s.status === "Active").length,
+                events: events.length,
+                attendanceRate: attendanceTotal > 0 ? Math.round((presentTotal / attendanceTotal) * 100) : 0
             });
+        }).catch((err) => {
+            console.error("DASHBOARD ERROR:", err);
+        });
     }, []);
 
     const metrics = [
         {
             label: "Visible scouts",
-            value: String(counts.total),
-            detail: counts.total === 0 ? "No records yet" : `${counts.active} active`,
+            value: String(counts.totalScouts),
+            detail: counts.totalScouts === 0 ? "No records yet" : `${counts.activeScouts} active`,
             icon: "users" as const,
             tone: "green",
         },
         {
             label: "Upcoming events",
-            value: "0",
-            detail: "No events scheduled",
+            value: String(counts.events),
+            detail: counts.events === 0 ? "No events scheduled" : "Events scheduled",
             icon: "calendar" as const,
             tone: "gold",
         },
         {
             label: "Attendance rate",
-            value: "—",
-            detail: "No attendance recorded",
+            value: counts.attendanceRate === 0 ? "—" : `${counts.attendanceRate}%`,
+            detail: counts.attendanceRate === 0 ? "No attendance recorded" : "Overall rate",
             icon: "attendance" as const,
             tone: "blue",
         },
@@ -79,19 +84,14 @@ function Dashboard() {
             </section>
 
             <section className="dashboard-grid">
-                <article className="panel dashboard-empty-panel">
-                    <span className="coming-soon-icon"><Icon name="events" size={27} /></span>
-                    <span className="eyebrow">Upcoming events</span>
-                    <h2>No events scheduled</h2>
-                    <p>Events you create will appear here with their real date, time, and location.</p>
-                    <Link className="button button-secondary" to="/events">Go to events</Link>
+                <article className="panel">
+                    <h2>Recent Actions</h2>
+                    <Link className="button button-secondary" to="/events">Manage Events</Link>
                 </article>
-                <article className="panel dashboard-empty-panel">
-                    <span className="coming-soon-icon"><Icon name="attendance" size={27} /></span>
-                    <span className="eyebrow">Attendance</span>
-                    <h2>No records yet</h2>
-                    <p>Attendance summaries will appear after you record your first meeting.</p>
-                    <Link className="button button-secondary" to="/attendance">Go to attendance</Link>
+                <article className="panel">
+                    <h2>Attendance</h2>
+                    <Link className="button button-secondary" to="/attendance">Record Attendance</Link>
+                    <Link className="button button-secondary" to="/attendance-history" style={{marginTop: '10px'}}>View History</Link>
                 </article>
             </section>
         </div>

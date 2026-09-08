@@ -4,13 +4,16 @@ CREATE TABLE IF NOT EXISTS users (
   id INT NOT NULL AUTO_INCREMENT,
   full_name VARCHAR(100) NOT NULL,
   username VARCHAR(50) NOT NULL,
+  email VARCHAR(254) NULL,
   password_hash VARCHAR(255) NOT NULL,
   role VARCHAR(20) NOT NULL DEFAULT 'UNIT_LEADER',
   unit VARCHAR(50) NULL,
   active TINYINT(1) NOT NULL DEFAULT 1,
+  session_version INT NOT NULL DEFAULT 0,
   created_at DATETIME NULL,
   PRIMARY KEY (id),
-  UNIQUE KEY uq_users_username (username)
+  UNIQUE KEY uq_users_username (username),
+  UNIQUE KEY uq_users_email (email)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS scouts (

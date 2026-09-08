@@ -115,6 +115,40 @@ export type AttendanceSaveResult = AttendanceSessionDetail & {
   updated: boolean;
 };
 
+export const eventTypes = [
+  "Weekly Meeting",
+  "Camp",
+  "Hike",
+  "Training",
+  "Competition",
+  "Service",
+  "Community Project",
+  "Other",
+] as const;
+
+export type EventType = (typeof eventTypes)[number];
+
+export type ScoutEvent = {
+  id: number;
+  title: string;
+  eventType: EventType;
+  startDate: string;
+  endDate: string;
+  startTime: string;
+  endTime: string;
+  location: string;
+  capacity: number | null;
+  notes: string;
+  createdBy: number | null;
+  createdAt: string;
+  updatedAt: string;
+  registrationCount: number;
+};
+
+export type ScoutEventInput = Omit<ScoutEvent, "id" | "createdBy" | "createdAt" | "updatedAt" | "registrationCount">;
+
+export type EventRegistration = Pick<Scout, "id" | "name" | "unit" | "status">;
+
 export type ScoutAttendanceProfileSummary = {
   scoutId: string;
   total: number;
@@ -133,6 +167,21 @@ export type ScoutAttendanceProfileSummary = {
     arrivalTime: string;
     notes: string;
   }>;
+};
+
+export type PointsTransaction = {
+  id: number;
+  scoutId: string;
+  points: number;
+  reason: string;
+  createdAt: string;
+};
+
+export type LeaderboardEntry = {
+  scoutId: string;
+  name: string;
+  unit: ScoutUnit;
+  totalPoints: number;
 };
 
 const API_URL = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
@@ -208,6 +257,7 @@ export const api = {
   setup: (input: {
     fullName: string;
     username: string;
+    email: string;
     password: string;
   }) =>
     request<{ token: string; user: AuthUser }>(
@@ -222,6 +272,23 @@ export const api = {
       {
         method: "POST",
         body: JSON.stringify({ username, password }),
+      },
+      false,
+    ),
+
+  requestPasswordReset: (email: string) =>
+    request<{ message: string }>(
+      "/auth/forgot-password",
+      { method: "POST", body: JSON.stringify({ email }) },
+      false,
+    ),
+
+  resetPassword: (token: string, password: string, confirmPassword: string) =>
+    request<{ message: string }>(
+      "/auth/reset-password",
+      {
+        method: "POST",
+        body: JSON.stringify({ token, password, confirmPassword }),
       },
       false,
     ),
@@ -271,6 +338,26 @@ export const api = {
       request<{ summary: ScoutAttendanceProfileSummary }>(
         `/attendance/scouts/${scoutId}/summary`,
       ),
+  },
+
+  points: {
+    add: (scoutId: string, points: number, reason: string) =>
+      request<{ transaction: PointsTransaction }>("/points", {
+        method: "POST",
+        body: JSON.stringify({ scoutId, points, reason }),
+      }),
+    leaderboard: () => request<{ leaderboard: LeaderboardEntry[] }>("/points/leaderboard"),
+    history: (scoutId: string) =>
+      request<{ transactions: PointsTransaction[] }>(`/points/scouts/${scoutId}/history`),
+  },
+
+  events: {
+    list: () => request<{ events: ScoutEvent[] }>("/events"),
+    get: (id: number) => request<{ event: ScoutEvent; registrations: EventRegistration[] }>(`/events/${id}`),
+    create: (input: ScoutEventInput) => request<{ event: ScoutEvent }>("/events", { method: "POST", body: JSON.stringify(input) }),
+    update: (id: number, input: ScoutEventInput) => request<{ event: ScoutEvent }>(`/events/${id}`, { method: "PUT", body: JSON.stringify(input) }),
+    remove: (id: number) => request<void>(`/events/${id}`, { method: "DELETE" }),
+    saveRegistrations: (id: number, scoutIds: string[]) => request<{ event: ScoutEvent; registrations: EventRegistration[] }>(`/events/${id}/registrations`, { method: "PUT", body: JSON.stringify({ scoutIds }) }),
   },
 };
 

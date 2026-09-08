@@ -1,0 +1,52 @@
+import {
+  addPoints,
+  getLeaderboard,
+  getScoutPointsHistory,
+} from "../services/pointsService.js";
+
+function errorStatus(error) {
+  const status = Number(error.status);
+  if (Number.isInteger(status) && status >= 400 && status <= 599) {
+    return status;
+  }
+  return 500;
+}
+
+async function run(response, send, action) {
+  try {
+    await action();
+  } catch (error) {
+    console.error("Points error:", error);
+    send(response, errorStatus(error), { error: error.message || "Points request failed." });
+  }
+}
+
+export async function addPointsController(request, response, context) {
+  await run(response, context.send, async () => {
+    const body = await context.readJson(request);
+    const { scoutId, pointsChange, reason } = body;
+    const leaderId = context.user.id;
+
+    if (!scoutId || typeof pointsChange !== 'number' || !reason) {
+      context.send(response, 400, { error: "Missing required fields (scoutId, pointsChange, reason)." });
+      return;
+    }
+
+    await addPoints(scoutId, pointsChange, reason, leaderId);
+    context.send(response, 201, { message: "Points added successfully." });
+  });
+}
+
+export async function getLeaderboardController(_request, response, context) {
+  await run(response, context.send, async () => {
+    const leaderboard = await getLeaderboard();
+    context.send(response, 200, { leaderboard });
+  });
+}
+
+export async function getScoutPointsController(_request, response, context, scoutId) {
+  await run(response, context.send, async () => {
+    const history = await getScoutPointsHistory(scoutId);
+    context.send(response, 200, { history });
+  });
+}
