@@ -75,6 +75,7 @@ function Scouts() {
             await api.points.add(editingId, Number(pointsChange), pointsReason.trim());
             setPointsChange("");
             setPointsReason("");
+            // Immediate re-fetch to update history and total
             fetchPointsHistory(editingId);
         } catch (err) {
             alert(err instanceof Error ? err.message : "Failed to update points.");
