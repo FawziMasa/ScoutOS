@@ -55,7 +55,7 @@ function Leaderboard() {
 
                     {!loading && entries.length === 0 && (
                         <div className="empty-state">
-                            <Icon name="medal" size={25} />
+                            <Icon name="shield" size={25} />
                             <h3>No points recorded yet</h3>
                         </div>
                     )}
