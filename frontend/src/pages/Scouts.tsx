@@ -308,23 +308,31 @@ function Scouts() {
 
                             {editingId && (
                                 <div className="field-wide" style={{marginTop: '20px', borderTop: '1px solid #eee', paddingTop: '10px'}}>
-                                    <h3>Points History ({scoutPoints.reduce((sum, t) => sum + t.points, 0)})</h3>
-                                    <ul style={{listStyle: 'none', padding: 0, maxHeight: '200px', overflowY: 'auto'}}>
-                                        {scoutPoints.map(t => (
-                                            <li key={t.id} style={{display: 'flex', justifyContent: 'space-between', padding: '5px 0'}}>
-                                                <span>{t.reason}</span>
-                                                <strong>{t.points > 0 ? `+${t.points}` : t.points}</strong>
-                                            </li>
-                                        ))}
-                                    </ul>
-                                    
-                                    <div style={{marginTop: '15px', padding: '10px', background: '#f9f9f9', borderRadius: '5px'}}>
-                                        <h4>Award / Deduct Points</h4>
-                                        <div style={{display: 'flex', gap: '10px', marginBottom: '10px'}}>
-                                            <input type="number" placeholder="Points (+/-)" value={pointsChange} onChange={e => setPointsChange(e.target.value)} style={{flex: 1}} />
-                                            <input type="text" placeholder="Reason" value={pointsReason} onChange={e => setPointsReason(e.target.value)} style={{flex: 2}} />
-                                            <button className="button button-primary" onClick={handlePointsSubmit} disabled={submittingPoints}>
-                                                {submittingPoints ? "…" : "Submit"}
+                                    <div style={{display: 'flex', gap: '20px', alignItems: 'flex-start'}}>
+                                        <div style={{flex: 1}}>
+                                            <h3>Points History</h3>
+                                            <p>Total: {scoutPoints.reduce((sum, t) => sum + t.points, 0)}</p>
+                                            <ul style={{listStyle: 'none', padding: 0, maxHeight: '200px', overflowY: 'auto'}}>
+                                                {scoutPoints.map(t => (
+                                                    <li key={t.id} style={{display: 'flex', justifyContent: 'space-between', padding: '5px 0', fontSize: '0.9em'}}>
+                                                        <span>{t.reason}</span>
+                                                        <strong>{t.points > 0 ? `+${t.points}` : t.points}</strong>
+                                                    </li>
+                                                ))}
+                                            </ul>
+                                        </div>
+                                        <div style={{flex: 1, padding: '10px', background: '#f9f9f9', borderRadius: '5px'}}>
+                                            <h4>Award / Deduct</h4>
+                                            <label className="field field-wide">
+                                                <span>Points (+/-)</span>
+                                                <input type="number" placeholder="e.g., 5 or -2" value={pointsChange} onChange={e => setPointsChange(e.target.value)} />
+                                            </label>
+                                            <label className="field field-wide">
+                                                <span>Reason</span>
+                                                <input type="text" placeholder="e.g., Participated in camp" value={pointsReason} onChange={e => setPointsReason(e.target.value)} />
+                                            </label>
+                                            <button className="button button-primary" onClick={handlePointsSubmit} disabled={submittingPoints} style={{width: '100%', marginTop: '10px'}}>
+                                                {submittingPoints ? "Submitting…" : "Apply Points"}
                                             </button>
                                         </div>
                                     </div>

@@ -341,10 +341,10 @@ export const api = {
   },
 
   points: {
-    add: (scoutId: string, points: number, reason: string) =>
+    add: (scoutId: string, pointsChange: number, reason: string) =>
       request<{ transaction: PointsTransaction }>("/points", {
         method: "POST",
-        body: JSON.stringify({ scoutId, points, reason }),
+        body: JSON.stringify({ scoutId, pointsChange, reason }),
       }),
     leaderboard: () => request<{ leaderboard: LeaderboardEntry[] }>("/points/leaderboard"),
     history: (scoutId: string) =>
