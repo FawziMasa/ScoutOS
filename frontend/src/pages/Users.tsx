@@ -87,6 +87,9 @@ function Users() {
                     <label className="field field-wide"><span>Username</span>
                         <input required placeholder="Username" value={form.username} onChange={e => setForm({...form, username: e.target.value})} />
                     </label>
+                    <label className="field field-wide"><span>Email Address</span>
+                        <input required type="email" placeholder="Email Address" value={form.email} onChange={e => setForm({...form, email: e.target.value})} />
+                    </label>
                     {!editingId && <label className="field field-wide"><span>Password</span>
                         <input required type="password" placeholder="Password" onChange={e => setForm({...form, password: e.target.value})} />
                     </label>}
