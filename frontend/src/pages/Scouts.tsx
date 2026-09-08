@@ -72,7 +72,7 @@ function Scouts() {
         
         try {
             setSubmittingPoints(true);
-            await api.points.add(editingId, parseInt(pointsChange), pointsReason);
+            await api.points.add(editingId, Number(pointsChange), pointsReason.trim());
             setPointsChange("");
             setPointsReason("");
             fetchPointsHistory(editingId);

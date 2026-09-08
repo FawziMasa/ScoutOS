@@ -19,12 +19,12 @@ export async function addPoints(scoutId, pointsChange, reason, leaderId) {
 
 export async function getLeaderboard() {
   const [rows] = await db.execute(`
-    SELECT sc.id as scout_id, sc.name as scout_name, sc.unit, COALESCE(SUM(pl.points_change), 0) as total_points
+    SELECT sc.id as scoutId, sc.name as name, sc.unit, COALESCE(SUM(pl.points_change), 0) as totalPoints
     FROM scouts sc
     LEFT JOIN points_ledger pl ON sc.id = pl.scout_id
     WHERE sc.status = 'Active'
     GROUP BY sc.id
-    ORDER BY total_points DESC
+    ORDER BY totalPoints DESC
   `);
   return rows;
 }

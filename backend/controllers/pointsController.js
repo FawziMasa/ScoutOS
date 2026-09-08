@@ -24,16 +24,20 @@ async function run(response, send, action) {
 export async function addPointsController(request, response, context) {
   await run(response, context.send, async () => {
     const body = await context.readJson(request);
-    const { scoutId, pointsChange, reason } = body;
+    
+    // Support both camelCase and snake_case
+    const scoutId = body.scoutId || body.scout_id;
+    const pointsChange = body.pointsChange ?? body.points_change;
+    const reason = body.reason;
     const leaderId = context.user.id;
 
     if (!scoutId || typeof pointsChange !== 'number' || !reason) {
-      context.send(response, 400, { error: "Missing required fields (scoutId, pointsChange, reason)." });
+      context.send(response, 400, { error: "Missing required fields (scoutId/scout_id, pointsChange/points_change, reason)." });
       return;
     }
 
     await addPoints(scoutId, pointsChange, reason, leaderId);
-    context.send(response, 201, { message: "Points added successfully." });
+    context.send(response, 200, { message: "Points added successfully." });
   });
 }
 
