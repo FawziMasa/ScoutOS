@@ -8,7 +8,10 @@ function configuredMailer() {
   const from = process.env.EMAIL_FROM;
   const secure = process.env.SMTP_SECURE === "true" || port === 465;
 
-  if (!host || !Number.isInteger(port) || port < 1 || !user || !pass || !from) {
+  // Check if all necessary credentials for SMTP exist
+  const hasRequiredConfig = host && user && pass && from && Number.isInteger(port) && port > 0;
+
+  if (!hasRequiredConfig) {
     throw new Error("SMTP is not configured.");
   }
 
