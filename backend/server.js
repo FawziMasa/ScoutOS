@@ -20,7 +20,7 @@ import db from "./database/db.js";
 import { handleAttendanceRoute } from "./routes/attendance.js";
 import { handleEventRoute } from "./routes/events.js";
 import { handlePointsRoute } from "./routes/points.js";
-import { sendPasswordResetEmail } from "./services/emailService.js";
+import { sendPasswordResetEmail, configuredMailer } from "./services/emailService.js";
 import {
   buildPasswordResetUrl,
   createPasswordResetToken,
@@ -819,6 +819,17 @@ const server = createServer(async (request, response) => {
   }
 
 });
+try {
+  const { user, transporter } = configuredMailer();
+  if (transporter) {
+    console.log(`[SMTP] Email transport initialized for: ${user}`);
+  } else {
+    console.warn("[SMTP] Email transport not initialized: SMTP_USER or SMTP_PASS missing.");
+  }
+} catch (e) {
+  console.warn(`[SMTP] Email transport error: ${e.message}`);
+}
+
 server.listen(port, "0.0.0.0", () => {
   console.log(`ScoutOS backend running at http://0.0.0.0:${port}`);
   console.log(`Storage: ${storePath}`);

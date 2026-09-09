@@ -1,22 +1,22 @@
 import nodemailer from "nodemailer";
 
-function configuredMailer() {
-  const host = process.env.SMTP_HOST;
-  const port = Number(process.env.SMTP_PORT || 587);
+export function configuredMailer() {
+  const host = process.env.SMTP_HOST || 'smtp.gmail.com';
+  const port = Number(process.env.SMTP_PORT) || 465;
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
   const from = process.env.EMAIL_FROM;
-  const secure = process.env.SMTP_SECURE === "true" || port === 465;
+  const isSecure = String(process.env.SMTP_SECURE).toLowerCase() === 'true';
+  const secure = isSecure || port === 465;
 
-  // Check if all necessary credentials for SMTP exist
-  const hasRequiredConfig = host && user && pass && from && Number.isInteger(port) && port > 0;
-
-  if (!hasRequiredConfig) {
-    throw new Error("SMTP is not configured.");
+  if (!user || !pass) {
+    console.warn("[SMTP] Email transport not initialized: SMTP_USER or SMTP_PASS missing.");
+    return { from, user, transporter: null };
   }
 
   return {
     from,
+    user,
     transporter: nodemailer.createTransport({
       host,
       port,
@@ -74,6 +74,10 @@ export function createPasswordResetEmail(resetUrl) {
 
 export async function sendPasswordResetEmail({ to, resetUrl }) {
   const { from, transporter } = configuredMailer();
+  if (!transporter) {
+    console.error("Cannot send email: SMTP transporter not initialized.");
+    return;
+  }
   const message = createPasswordResetEmail(resetUrl);
 
   await transporter.sendMail({
