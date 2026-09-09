@@ -6,6 +6,7 @@ function configuredMailer() {
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
   const from = process.env.EMAIL_FROM;
+  const secure = process.env.SMTP_SECURE === "true" || port === 465;
 
   if (!host || !Number.isInteger(port) || port < 1 || !user || !pass || !from) {
     throw new Error("SMTP is not configured.");
@@ -16,7 +17,7 @@ function configuredMailer() {
     transporter: nodemailer.createTransport({
       host,
       port,
-      secure: port === 465,
+      secure,
       auth: { user, pass },
     }),
   };

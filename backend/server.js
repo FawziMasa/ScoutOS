@@ -465,12 +465,16 @@ const server = createServer(async (request, response) => {
             to: delivery.email,
             resetUrl: buildPasswordResetUrl(process.env.FRONTEND_URL || allowedOrigin, delivery.token),
           });
-        } catch {
+        } catch (err) {
           await db.execute(
             "DELETE FROM password_reset_tokens WHERE user_id = ? AND token_hash = ? AND used_at IS NULL",
             [delivery.userId, delivery.tokenHash],
           );
-          console.error("Password reset email delivery failed.");
+          console.error("Password reset email delivery failed:", {
+            message: err.message,
+            code: err.code,
+            command: err.command,
+          });
         }
       }
 
