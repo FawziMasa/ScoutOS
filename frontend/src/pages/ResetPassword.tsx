@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import Icon from "../components/Icon";
@@ -7,7 +7,16 @@ import "./Login.css";
 
 function ResetPassword() {
   const [searchParams] = useSearchParams();
-  const token = searchParams.get("token") || "";
+  const urlToken = searchParams.get("token");
+  const [token, setToken] = useState(urlToken || sessionStorage.getItem("resetToken") || "");
+
+  useEffect(() => {
+    if (urlToken) {
+      setToken(urlToken);
+      sessionStorage.setItem("resetToken", urlToken);
+    }
+  }, [urlToken]);
+
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
@@ -34,6 +43,7 @@ function ResetPassword() {
       setLoading(true);
       await api.resetPassword(token, password, confirmPassword);
       setSuccess(true);
+      sessionStorage.removeItem("resetToken");
       setPassword("");
       setConfirmPassword("");
     } catch (resetError) {
