@@ -9,6 +9,7 @@ const links = [
   { path: "/gallery", label: "Gallery", icon: "image" as const },
   { path: "/attendance", label: "Attendance", icon: "attendance" as const },
   { path: "/leaderboard", label: "Leaderboard", icon: "shield" as const },
+  { path: "/finance", label: "Finance & Procurement", icon: "wallet" as const },
 ];
 
 type SidebarProps = {

@@ -156,6 +156,57 @@ export type ScoutEvent = {
 
 export type ScoutEventInput = Omit<ScoutEvent, "id" | "createdBy" | "createdAt" | "updatedAt" | "registrationCount">;
 
+export const financeTransactionTypes = ["EXPENSE", "INCOME"] as const;
+export type FinanceTransactionType = (typeof financeTransactionTypes)[number];
+export const financeStatuses = ["COMPLETED", "PENDING", "CANCELLED"] as const;
+export type FinanceStatus = (typeof financeStatuses)[number];
+export const financePaymentMethods = ["Cash", "Bank Transfer", "Card", "Mobile Wallet", "Other"] as const;
+export type FinancePaymentMethod = (typeof financePaymentMethods)[number];
+
+export type FinanceActor = {
+  id: string;
+  fullName: string;
+  username: string;
+} | null;
+
+export type FinanceTransaction = {
+  id: number;
+  unit: ScoutUnit;
+  transactionType: FinanceTransactionType;
+  category: string;
+  description: string;
+  vendorPaidTo: string;
+  amount: number;
+  paymentMethod: FinancePaymentMethod;
+  status: FinanceStatus;
+  transactionDate: string;
+  referenceNumber: string;
+  notes: string;
+  createdBy: FinanceActor;
+  createdAt: string;
+  updatedBy: FinanceActor;
+  updatedAt: string;
+};
+
+export type FinanceTransactionInput = Omit<FinanceTransaction, "id" | "createdBy" | "createdAt" | "updatedBy" | "updatedAt">;
+
+export type FinanceFilters = {
+  search?: string;
+  unit?: ScoutUnit | "";
+  transactionType?: FinanceTransactionType | "";
+  category?: string;
+  status?: FinanceStatus | "";
+  dateFrom?: string;
+  dateTo?: string;
+};
+
+export type FinanceSummary = {
+  totalExpenses: number;
+  thisMonth: number;
+  pending: number;
+  transactions: number;
+};
+
 export type EventRegistration = Pick<Scout, "id" | "name" | "unit" | "status">;
 
 export type ScoutAttendanceProfileSummary = {
@@ -491,6 +542,25 @@ export const api = {
     update: (id: number, input: ScoutEventInput) => request<{ event: ScoutEvent }>(`/events/${id}`, { method: "PUT", body: JSON.stringify(input) }),
     remove: (id: number) => request<void>(`/events/${id}`, { method: "DELETE" }),
     saveRegistrations: (id: number, scoutIds: string[]) => request<{ event: ScoutEvent; registrations: EventRegistration[] }>(`/events/${id}/registrations`, { method: "PUT", body: JSON.stringify({ scoutIds }) }),
+  },
+
+  finance: {
+    transactions: (filters: FinanceFilters = {}) =>
+      request<{ transactions: FinanceTransaction[] }>(`/finance/transactions${buildQuery(filters)}`),
+    summary: (filters: FinanceFilters = {}) =>
+      request<{ summary: FinanceSummary }>(`/finance/summary${buildQuery(filters)}`),
+    get: (id: number) => request<{ transaction: FinanceTransaction }>(`/finance/transactions/${id}`),
+    create: (input: FinanceTransactionInput) =>
+      request<{ transaction: FinanceTransaction }>("/finance/transactions", {
+        method: "POST",
+        body: JSON.stringify(input),
+      }),
+    update: (id: number, input: FinanceTransactionInput) =>
+      request<{ transaction: FinanceTransaction }>(`/finance/transactions/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(input),
+      }),
+    remove: (id: number) => request<void>(`/finance/transactions/${id}`, { method: "DELETE" }),
   },
 
   gallery: {

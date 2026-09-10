@@ -6,6 +6,7 @@ import AttendanceHistory from "./pages/AttendanceHistory";
 import Attendance from "./pages/Attendance";
 import Dashboard from "./pages/Dashboard";
 import Events from "./pages/Events";
+import Finance from "./pages/Finance";
 import ForgotPassword from "./pages/ForgotPassword";
 import Gallery from "./pages/Gallery";
 import Leaderboard from "./pages/Leaderboard";
@@ -34,6 +35,7 @@ function App() {
           <Route path="/scouts" element={<Scouts />} />
           <Route path="/leaderboard" element={<Leaderboard />} />
           <Route path="/events" element={<Events />} />
+          <Route path="/finance" element={<Finance />} />
           <Route path="/gallery" element={<Gallery />} />
           <Route path="/attendance" element={<Attendance />} />
           <Route path="/attendance-history" element={<AttendanceHistory />} />

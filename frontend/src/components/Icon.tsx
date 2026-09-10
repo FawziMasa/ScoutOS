@@ -8,6 +8,7 @@ type IconName =
   | "dashboard"
   | "edit"
   | "events"
+  | "eye"
   | "folder"
   | "image"
   | "logout"
@@ -20,6 +21,7 @@ type IconName =
   | "trash"
   | "upload"
   | "users"
+  | "wallet"
   | "x";
 
 type IconProps = {
@@ -66,6 +68,12 @@ const paths: Record<IconName, React.ReactNode> = {
       <path d="M15 2v4M9 2v4" />
       <rect width="18" height="18" x="3" y="4" rx="2" />
       <path d="M3 10h18M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01" />
+    </>
+  ),
+  eye: (
+    <>
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" />
+      <circle cx="12" cy="12" r="3" />
     </>
   ),
   folder: (
@@ -131,6 +139,12 @@ const paths: Record<IconName, React.ReactNode> = {
       <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
       <circle cx="9" cy="7" r="4" />
       <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+    </>
+  ),
+  wallet: (
+    <>
+      <path d="M20 7V5a2 2 0 0 0-2-2H5a3 3 0 0 0 0 6h15v10a2 2 0 0 1-2 2H5a3 3 0 0 1-3-3V6" />
+      <path d="M16 13h4" />
     </>
   ),
   x: <path d="M18 6 6 18M6 6l12 12" />,
