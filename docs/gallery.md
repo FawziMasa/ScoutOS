@@ -1,13 +1,14 @@
 # ScoutOS Gallery
 
-The Gallery stores uploaded image files in Cloudinary and stores only metadata
-and storage references in MySQL. Uploaded image binaries are not stored in
-MySQL, Render local disk, Vercel build files, or GitHub.
+The Gallery stores metadata in MySQL. If Cloudinary credentials are configured,
+image files are stored in Cloudinary. If Cloudinary is not configured, ScoutOS
+stores the image bytes in the MySQL `gallery_photo_files` table so uploads work
+without any extra storage service.
 
 ## Backend environment
 
-Create a Cloudinary account, then add these variables to the Render backend
-environment:
+Cloudinary is optional. To use it instead of MySQL-backed image storage, create
+a Cloudinary account and add these variables to the Render backend environment:
 
 ```env
 CLOUDINARY_CLOUD_NAME=your-cloudinary-cloud-name
@@ -26,6 +27,7 @@ The Gallery schema is added to the existing self-healing startup schema through
 
 - `gallery_albums`
 - `gallery_photos`
+- `gallery_photo_files`
 
 The default album is `Scout Moments`. The manual SQL equivalent is available at
 `database/20260910_create_gallery_tables.sql`.

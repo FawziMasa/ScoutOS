@@ -60,6 +60,23 @@ export async function ensureGallerySchema() {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
   `);
 
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS gallery_photo_files (
+      storage_key VARCHAR(255) NOT NULL,
+      photo_id BIGINT UNSIGNED NOT NULL,
+      content_type VARCHAR(80) NOT NULL,
+      file_size INT UNSIGNED NOT NULL,
+      image_data LONGBLOB NOT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      PRIMARY KEY (storage_key),
+      UNIQUE KEY uq_gallery_photo_files_photo_id (photo_id),
+      CONSTRAINT fk_gallery_photo_files_photo
+        FOREIGN KEY (photo_id) REFERENCES gallery_photos(id)
+        ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  `);
+
   await db.execute(
     `
       INSERT INTO gallery_albums (name, slug, description, created_at, updated_at)

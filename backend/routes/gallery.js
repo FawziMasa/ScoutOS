@@ -4,6 +4,7 @@ import {
   getGallerySummaryRecord,
   listGalleryAlbumRecords,
   listGalleryPhotoRecords,
+  serveGalleryMediaRecord,
   updateGalleryPhotoRecord,
   uploadGalleryPhotoRecords,
 } from "../controllers/galleryController.js";
@@ -11,6 +12,12 @@ import {
 export async function handleGalleryRoute(request, response, context) {
   const { path } = context;
   if (!path.startsWith("/api/gallery")) return false;
+
+  const mediaMatch = path.match(/^\/api\/gallery\/media\/([^/]+)\/(?:image|thumbnail)$/);
+  if (request.method === "GET" && mediaMatch) {
+    await serveGalleryMediaRecord(request, response, context, decodeURIComponent(mediaMatch[1]));
+    return true;
+  }
 
   if (request.method === "GET" && path === "/api/gallery/summary") {
     await getGallerySummaryRecord(request, response, context);

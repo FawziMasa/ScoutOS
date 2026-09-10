@@ -346,6 +346,27 @@ function buildQuery(params: Record<string, string | number | boolean | null | un
   return queryString ? `?${queryString}` : "";
 }
 
+function apiOrigin() {
+  if (API_URL.startsWith("http://") || API_URL.startsWith("https://")) {
+    return API_URL.replace(/\/api$/, "");
+  }
+
+  return "";
+}
+
+function resolveMediaUrl(url: string) {
+  if (!url.startsWith("/api/")) return url;
+  return `${apiOrigin()}${url}`;
+}
+
+function normalizeGalleryPhoto(photo: GalleryPhoto): GalleryPhoto {
+  return {
+    ...photo,
+    imageUrl: resolveMediaUrl(photo.imageUrl),
+    thumbnailUrl: resolveMediaUrl(photo.thumbnailUrl),
+  };
+}
+
 export const api = {
   setupStatus: () =>
     request<{ setupRequired: boolean }>("/auth/setup-status", {}, false),
@@ -482,9 +503,17 @@ export const api = {
           mine: filters.mine || undefined,
           search: filters.search,
         })}`,
-      ),
+      ).then((result) => ({
+        ...result,
+        photos: result.photos.map(normalizeGalleryPhoto),
+      })),
     summary: (limit = 4) =>
-      request<{ summary: GallerySummary }>(`/gallery/summary${buildQuery({ limit })}`),
+      request<{ summary: GallerySummary }>(`/gallery/summary${buildQuery({ limit })}`).then((result) => ({
+        summary: {
+          ...result.summary,
+          latestPhotos: result.summary.latestPhotos.map(normalizeGalleryPhoto),
+        },
+      })),
     albums: () => request<{ albums: GalleryAlbum[] }>("/gallery/albums"),
     createAlbum: (name: string) =>
       request<{ album: GalleryAlbum }>("/gallery/albums", {
@@ -501,13 +530,16 @@ export const api = {
       return request<GalleryUploadResult>("/gallery/photos", {
         method: "POST",
         body: formData,
-      });
+      }).then((result) => ({
+        ...result,
+        uploaded: result.uploaded.map(normalizeGalleryPhoto),
+      }));
     },
     update: (id: number, input: { caption?: string; albumId?: number | null; eventDate?: string }) =>
       request<{ photo: GalleryPhoto }>(`/gallery/photos/${id}`, {
         method: "PUT",
         body: JSON.stringify(input),
-      }),
+      }).then((result) => ({ photo: normalizeGalleryPhoto(result.photo) })),
     remove: (id: number) =>
       request<{ warning: string | null }>(`/gallery/photos/${id}`, { method: "DELETE" }),
   },

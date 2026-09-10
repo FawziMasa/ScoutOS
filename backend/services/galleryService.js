@@ -6,7 +6,8 @@ import {
 } from "../database/galleryMigration.js";
 import {
   deleteGalleryImage,
-  galleryStorageConfigured,
+  getDatabaseGalleryImage,
+  persistGalleryImage,
   uploadGalleryImage,
 } from "./galleryStorage.js";
 
@@ -241,6 +242,15 @@ function mapPhoto(row, user = null) {
     canEdit: user ? canManagePhoto(user, row) : false,
     canDelete: user ? canManagePhoto(user, row) : false,
   };
+}
+
+export async function getGalleryMedia(storageKey) {
+  const image = await getDatabaseGalleryImage(storageKey);
+  if (!image) {
+    throw createHttpError(404, "Gallery image not found.");
+  }
+
+  return image;
 }
 
 async function getPhotoRow(id) {
@@ -495,13 +505,6 @@ export async function uploadGalleryPhotos({ fields, files }, user) {
   if (photoFiles.length > MAX_GALLERY_FILES) {
     throw createHttpError(400, `Upload at most ${MAX_GALLERY_FILES} photos at a time.`);
   }
-  if (!galleryStorageConfigured()) {
-    throw createHttpError(
-      500,
-      "Gallery storage is not configured. Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET on the backend.",
-    );
-  }
-
   const caption = trimOptional(firstField(fields, "caption"), 500, "Caption");
   const eventDate = normalizeDate(firstField(fields, "eventDate"), "Event date");
   const album = await resolveAlbum(fields, user);
@@ -510,6 +513,7 @@ export async function uploadGalleryPhotos({ fields, files }, user) {
 
   for (const [index, file] of photoFiles.entries()) {
     let storageKey = null;
+    let insertedPhotoId = null;
 
     try {
       const validatedFile = validateImageFile(file);
@@ -553,9 +557,20 @@ export async function uploadGalleryPhotos({ fields, files }, user) {
           storage.height || validatedFile.height,
         ],
       );
+      insertedPhotoId = result.insertId;
+      await persistGalleryImage(storage, result.insertId);
 
       uploaded.push(mapPhoto(await getPhotoRow(result.insertId), user));
     } catch (error) {
+      if (insertedPhotoId) {
+        await db.execute(
+          "UPDATE gallery_photos SET status = 'deleted', deleted_at = NOW(), updated_at = NOW() WHERE id = ?",
+          [insertedPhotoId],
+        ).catch((cleanupError) => {
+          console.error("Gallery metadata cleanup failed:", cleanupError);
+        });
+      }
+
       if (storageKey) {
         await deleteGalleryImage(storageKey).catch((cleanupError) => {
           console.error("Gallery upload cleanup failed:", cleanupError);

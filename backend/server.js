@@ -583,6 +583,18 @@ const server = createServer(async (request, response) => {
       });
     }
 
+    if (request.method === "GET" && path.startsWith("/api/gallery/media/")) {
+      const galleryMediaHandled = await handleGalleryRoute(request, response, {
+        path,
+        user: null,
+        send,
+        sendNoContent,
+        readJson,
+      });
+
+      if (galleryMediaHandled) return;
+    }
+
     const user = await authenticate(request);
     if (!user) return send(response, 401, { error: "Authentication required." });
 

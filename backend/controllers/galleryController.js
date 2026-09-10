@@ -2,6 +2,7 @@ import {
   createGalleryAlbum,
   deleteGalleryPhoto,
   getGallerySummary,
+  getGalleryMedia,
   listGalleryAlbums,
   listGalleryPhotos,
   MAX_GALLERY_FILES,
@@ -89,5 +90,18 @@ export async function getGallerySummaryRecord(request, response, context) {
   await run(response, context.send, async () => {
     const params = queryParams(request);
     context.send(response, 200, { summary: await getGallerySummary(context.user, params.limit) });
+  });
+}
+
+export async function serveGalleryMediaRecord(_request, response, context, storageKey) {
+  await run(response, context.send, async () => {
+    const image = await getGalleryMedia(storageKey);
+    response.writeHead(200, {
+      "Content-Type": image.contentType,
+      "Content-Length": image.fileSize,
+      "Cache-Control": "public, max-age=31536000, immutable",
+      "X-Content-Type-Options": "nosniff",
+    });
+    response.end(image.buffer);
   });
 }
