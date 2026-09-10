@@ -274,6 +274,7 @@ export async function getFinanceSummary(user, filters = {}) {
   const { where, values } = appendFilters(user, filters);
   const [rows] = await db.execute(`
     SELECT
+      COALESCE(SUM(CASE WHEN t.transaction_type = 'INCOME' AND t.status <> 'CANCELLED' THEN t.amount ELSE 0 END), 0) AS total_income,
       COALESCE(SUM(CASE WHEN t.transaction_type = 'EXPENSE' AND t.status <> 'CANCELLED' THEN t.amount ELSE 0 END), 0) AS total_expenses,
       COALESCE(SUM(CASE WHEN t.transaction_type = 'EXPENSE' AND t.status <> 'CANCELLED' AND t.transaction_date >= DATE_FORMAT(CURDATE(), '%Y-%m-01') AND t.transaction_date <= CURDATE() THEN t.amount ELSE 0 END), 0) AS this_month,
       COALESCE(SUM(CASE WHEN t.status = 'PENDING' THEN 1 ELSE 0 END), 0) AS pending,
@@ -281,8 +282,14 @@ export async function getFinanceSummary(user, filters = {}) {
     FROM finance_transactions t${where}
   `, values);
   const row = rows[0];
+  const totalIncome = Number(row.total_income);
+  const totalExpenses = Number(row.total_expenses);
+  const balance = totalIncome - totalExpenses;
   return {
-    totalExpenses: Number(row.total_expenses),
+    totalIncome,
+    totalExpenses,
+    balance,
+    debt: balance < 0 ? Math.abs(balance) : 0,
     thisMonth: Number(row.this_month),
     pending: Number(row.pending),
     transactions: Number(row.transactions),

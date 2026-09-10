@@ -7,7 +7,7 @@ process.env.DB_PASSWORD ??= "test";
 process.env.DB_NAME ??= "test";
 
 const { default: db } = await import("../database/db.js");
-const { createTransaction, listTransactions, updateTransaction } = await import("../services/financeService.js");
+const { createTransaction, getFinanceSummary, listTransactions, updateTransaction } = await import("../services/financeService.js");
 
 const unitLeader = { id: "12", role: "UNIT_LEADER", unit: "أشبال و زهرات" };
 const admin = { id: "99", role: "ADMIN", unit: null };
@@ -109,6 +109,32 @@ test("an Admin correction preserves created_by and records the authenticated upd
     assert.doesNotMatch(update.sql, /created_by/);
     assert.equal(update.values.at(-2), 99);
     assert.equal(update.values.at(-1), 8);
+  } finally {
+    db.execute = originalExecute;
+  }
+});
+
+test("financial summary reports the whole balance and debt from income minus expenses", async () => {
+  const originalExecute = db.execute;
+  db.execute = async () => [[{
+    total_income: "3.00",
+    total_expenses: "0.00",
+    this_month: "0.00",
+    pending: 0,
+    transactions: 1,
+  }]];
+
+  try {
+    const summary = await getFinanceSummary(admin);
+    assert.deepEqual(summary, {
+      totalIncome: 3,
+      totalExpenses: 0,
+      balance: 3,
+      debt: 0,
+      thisMonth: 0,
+      pending: 0,
+      transactions: 1,
+    });
   } finally {
     db.execute = originalExecute;
   }

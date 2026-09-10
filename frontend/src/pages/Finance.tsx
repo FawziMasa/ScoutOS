@@ -24,7 +24,7 @@ function today() {
 }
 
 function emptySummary(): FinanceSummary {
-  return { totalExpenses: 0, thisMonth: 0, pending: 0, transactions: 0 };
+  return { totalIncome: 0, totalExpenses: 0, balance: 0, debt: 0, thisMonth: 0, pending: 0, transactions: 0 };
 }
 
 function createEmptyTransaction(unit: ScoutUnit): FinanceTransactionInput {
@@ -88,32 +88,43 @@ function Finance() {
   const [readOnly, setReadOnly] = useState(false);
   const [editing, setEditing] = useState<FinanceTransaction | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const availableCategories = useMemo(() => [...new Set([...categories, ...transactions.map((transaction) => transaction.category)])].sort(), [transactions]);
 
-  const load = async (activeFilters = filters) => {
+  const load = async (activeFilters = filters, background = false) => {
     try {
-      setLoading(true);
-      setError("");
+      if (background) setRefreshing(true);
+      else {
+        setLoading(true);
+        setError("");
+      }
       const [transactionResult, summaryResult] = await Promise.all([
         api.finance.transactions(activeFilters),
         api.finance.summary(activeFilters),
       ]);
       setTransactions(transactionResult.transactions);
       setSummary(summaryResult.summary);
+      setLastUpdated(new Date());
     } catch (loadError) {
       setError(loadError instanceof Error ? loadError.message : "Could not load finance transactions.");
     } finally {
-      setLoading(false);
+      if (background) setRefreshing(false);
+      else setLoading(false);
     }
   };
 
   useEffect(() => {
-    const timer = window.setTimeout(() => { void load(filters); }, 180);
-    return () => window.clearTimeout(timer);
-    // Finance search and filters are server-side so each view remains scope-safe.
+    const initialTimer = window.setTimeout(() => { void load(filters); }, 180);
+    const refreshTimer = window.setInterval(() => { void load(filters, true); }, 30_000);
+    return () => {
+      window.clearTimeout(initialTimer);
+      window.clearInterval(refreshTimer);
+    };
+    // Finance filters and the live refresh both use server-side, scope-safe data.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [filters]);
 
@@ -174,25 +185,44 @@ function Finance() {
     }
   };
 
+  const balanceLabel = summary.balance < 0 ? "Amount owed" : summary.balance === 0 ? "Balanced" : "Available funds";
+  const balanceDescription = summary.balance < 0
+    ? `Your permitted scope is in debt by ${formatMoney(summary.debt)}.`
+    : summary.balance === 0
+      ? "Income and expenses are currently equal."
+      : `Your permitted scope has ${formatMoney(summary.balance)} available.`;
+  const hasActiveFilters = Object.values(filters).some(Boolean);
+  const scopeLabel = hasActiveFilters
+    ? "Filtered balance"
+    : unitLocked && user?.unit
+      ? `Your ${user.unit} unit balance`
+      : user?.role === "ADMIN"
+        ? "Whole ScoutOS balance"
+        : "Authorized scope balance";
+
   return (
     <div className="page finance-page">
       <header className="page-header">
         <div>
           <span className="eyebrow">Finance & Procurement</span>
           <h1>Financial transactions</h1>
-          <p>{unitLocked && user?.unit ? `Your view is secured to ${user.unit}.` : "Track expenses and income across the ScoutOS scope assigned to your role."}</p>
+          <p>{unitLocked && user?.unit ? `Your view is secured to ${user.unit}.` : "Track income, expenses, and the current financial position across your authorized ScoutOS scope."}</p>
         </div>
         <button className="button button-primary" onClick={openCreate} type="button"><Icon name="plus" size={18} />Add transaction</button>
       </header>
 
       {error && <div className="form-error finance-error">{error}</div>}
 
-      <section className="metrics-grid finance-metrics" aria-label="Financial summary">
-        <article className="metric-card"><span className="metric-icon green"><Icon name="wallet" size={22} /></span><div><p>Total expenses</p><strong>{formatMoney(summary.totalExpenses)}</strong><small>Excludes cancelled</small></div></article>
-        <article className="metric-card"><span className="metric-icon gold"><Icon name="calendar" size={22} /></span><div><p>This month</p><strong>{formatMoney(summary.thisMonth)}</strong><small>Expenses to date</small></div></article>
-        <article className="metric-card"><span className="metric-icon blue"><Icon name="events" size={22} /></span><div><p>Pending</p><strong>{summary.pending}</strong><small>Awaiting completion</small></div></article>
-        <article className="metric-card"><span className="metric-icon green"><Icon name="folder" size={22} /></span><div><p>Transactions</p><strong>{summary.transactions}</strong><small>Matching records</small></div></article>
+      <section className="metrics-grid finance-metrics" aria-label="Financial dashboard">
+        <article className={`metric-card finance-balance-card ${summary.balance < 0 ? "is-debt" : summary.balance > 0 ? "is-positive" : "is-even"}`} aria-live="polite"><span className="metric-icon"><Icon name="wallet" size={22} /></span><div><p>{scopeLabel}</p><strong>{formatMoney(Math.abs(summary.balance))}</strong><small>{balanceLabel}</small></div><p className="finance-balance-description">{balanceDescription}</p></article>
+        <article className="metric-card"><span className="metric-icon green"><Icon name="wallet" size={22} /></span><div><p>Total income</p><strong>{formatMoney(summary.totalIncome)}</strong><small>Excludes cancelled</small></div></article>
+        <article className="metric-card"><span className="metric-icon gold"><Icon name="calendar" size={22} /></span><div><p>Total expenses</p><strong>{formatMoney(summary.totalExpenses)}</strong><small>Excludes cancelled</small></div></article>
+        <article className="metric-card"><span className="metric-icon blue"><Icon name="events" size={22} /></span><div><p>Debt</p><strong>{formatMoney(summary.debt)}</strong><small>{summary.debt > 0 ? "Deficit to resolve" : "No debt recorded"}</small></div></article>
+        <article className="metric-card"><span className="metric-icon green"><Icon name="folder" size={22} /></span><div><p>Pending</p><strong>{summary.pending}</strong><small>Awaiting completion</small></div></article>
+        <article className="metric-card"><span className="metric-icon blue"><Icon name="events" size={22} /></span><div><p>Transactions</p><strong>{summary.transactions}</strong><small>Matching records</small></div></article>
       </section>
+
+      <div className="finance-live-status" aria-live="polite"><span className="status-dot" /> <span>{refreshing ? "Refreshing financial data…" : "Financial data refreshes every 30 seconds."}</span>{lastUpdated && <small>Last synced {formatTimestamp(lastUpdated.toISOString())}</small>}<button className="finance-refresh-button" disabled={refreshing || loading} onClick={() => { void load(filters); }} type="button">Refresh now</button></div>
 
       <section className="panel table-panel finance-table-panel">
         <div className="finance-filters">

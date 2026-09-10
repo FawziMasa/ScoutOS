@@ -201,7 +201,10 @@ export type FinanceFilters = {
 };
 
 export type FinanceSummary = {
+  totalIncome: number;
   totalExpenses: number;
+  balance: number;
+  debt: number;
   thisMonth: number;
   pending: number;
   transactions: number;
