@@ -1,28 +1,30 @@
 import nodemailer from "nodemailer";
 
 export function configuredMailer() {
-  const host = process.env.SMTP_HOST || 'smtp.gmail.com';
-  const port = Number(process.env.SMTP_PORT) || 465;
+  const from = process.env.EMAIL_FROM;
   const user = process.env.SMTP_USER;
   const pass = process.env.SMTP_PASS;
-  const from = process.env.EMAIL_FROM;
-  const isSecure = String(process.env.SMTP_SECURE).toLowerCase() === 'true';
-  const secure = isSecure || port === 465;
 
   if (!user || !pass) {
     console.warn("[SMTP] Email transport not initialized: SMTP_USER or SMTP_PASS missing.");
     return { from, user, transporter: null };
   }
 
+  const transporter = nodemailer.createTransport({
+    host: process.env.SMTP_HOST || 'smtp.gmail.com',
+    port: Number(process.env.SMTP_PORT) || 587,
+    secure: String(process.env.SMTP_SECURE).toLowerCase() === 'true',
+    family: 4, // Force IPv4
+    auth: {
+      user: process.env.SMTP_USER,
+      pass: process.env.SMTP_PASS,
+    },
+  });
+
   return {
     from,
     user,
-    transporter: nodemailer.createTransport({
-      host,
-      port,
-      secure,
-      auth: { user, pass },
-    }),
+    transporter,
   };
 }
 
