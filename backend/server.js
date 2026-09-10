@@ -19,6 +19,7 @@ import { ensureCoreSchema } from "./database/schema.js";
 import db from "./database/db.js";
 import { handleAttendanceRoute } from "./routes/attendance.js";
 import { handleEventRoute } from "./routes/events.js";
+import { handleGalleryRoute } from "./routes/gallery.js";
 import { handlePointsRoute } from "./routes/points.js";
 import { sendPasswordResetEmail, configuredMailer } from "./services/emailService.js";
 import {
@@ -608,6 +609,16 @@ const server = createServer(async (request, response) => {
     });
 
     if (eventsHandled) return;
+
+    const galleryHandled = await handleGalleryRoute(request, response, {
+      path,
+      user,
+      send,
+      sendNoContent,
+      readJson,
+    });
+
+    if (galleryHandled) return;
 
     const pointsHandled = await handlePointsRoute(request, response, {
       path,

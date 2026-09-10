@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import DashboardGalleryPreview from "../components/gallery/DashboardGalleryPreview";
 import Icon from "../components/Icon";
 import { api, getStoredUser } from "../lib/api";
 
@@ -93,6 +94,7 @@ function Dashboard() {
                     <Link className="button button-secondary" to="/attendance">Record Attendance</Link>
                     <Link className="button button-secondary" to="/attendance-history" style={{marginTop: '10px'}}>View History</Link>
                 </article>
+                <DashboardGalleryPreview />
             </section>
         </div>
     );

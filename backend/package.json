@@ -10,7 +10,7 @@
     "dev": "node --watch server.js",
     "start": "node server.js",
     "migrate": "node scripts/migrate.js",
-    "check": "node --check server.js && node --check services/passwordResetService.js && node --check services/emailService.js",
+    "check": "node --check server.js && node --check services/passwordResetService.js && node --check services/emailService.js && node --check database/galleryMigration.js && node --check routes/gallery.js && node --check controllers/galleryController.js && node --check services/galleryService.js && node --check services/galleryStorage.js && node --check services/multipartForm.js",
     "test": "node --test"
   },
   "dependencies": {

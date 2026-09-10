@@ -36,6 +36,15 @@ export type AuthUser = {
   createdAt: string;
 };
 
+export type UserInput = {
+  fullName: string;
+  username: string;
+  email: string;
+  password?: string;
+  role: UserRole;
+  unit: ScoutUnit | null;
+};
+
 export type Scout = {
   id: string;
   name: string;
@@ -184,6 +193,76 @@ export type LeaderboardEntry = {
   totalPoints: number;
 };
 
+export type GalleryAlbum = {
+  id: number;
+  name: string;
+  slug: string;
+  description: string;
+  photoCount: number;
+  coverThumbnailUrl: string | null;
+  latestPhotoAt: string;
+  createdBy: number | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type GalleryPhoto = {
+  id: number;
+  storageKey: string;
+  imageUrl: string;
+  thumbnailUrl: string;
+  caption: string;
+  albumId: number;
+  albumName: string;
+  eventDate: string;
+  uploadedBy: {
+    id: string;
+    fullName: string;
+    username: string;
+    role: string;
+  } | null;
+  originalFilename: string;
+  mimeType: string;
+  fileSize: number;
+  width: number | null;
+  height: number | null;
+  createdAt: string;
+  updatedAt: string;
+  canEdit: boolean;
+  canDelete: boolean;
+};
+
+export type GalleryPhotoFilters = {
+  albumId?: number | null;
+  cursor?: string | null;
+  limit?: number;
+  mine?: boolean;
+  search?: string;
+};
+
+export type GalleryUploadInput = {
+  files: File[];
+  caption?: string;
+  albumId?: number | null;
+  albumName?: string;
+  eventDate?: string;
+};
+
+export type GalleryUploadResult = {
+  uploaded: GalleryPhoto[];
+  failed: Array<{
+    index: number;
+    filename: string;
+    error: string;
+  }>;
+};
+
+export type GallerySummary = {
+  totalPhotos: number;
+  totalAlbums: number;
+  latestPhotos: GalleryPhoto[];
+};
+
 const API_URL = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
 const tokenKey = "scoutos-token";
 const userKey = "scoutos-user";
@@ -224,7 +303,11 @@ async function request<T>(
   authenticated = true,
 ): Promise<T> {
   const headers = new Headers(options.headers);
-  headers.set("Content-Type", "application/json");
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
+
+  if (!isFormData && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
 
   if (authenticated) {
     const token = getToken();
@@ -248,6 +331,19 @@ async function request<T>(
   }
 
   return body as T;
+}
+
+function buildQuery(params: Record<string, string | number | boolean | null | undefined>) {
+  const query = new URLSearchParams();
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value !== null && value !== undefined && value !== "") {
+      query.set(key, String(value));
+    }
+  }
+
+  const queryString = query.toString();
+  return queryString ? `?${queryString}` : "";
 }
 
 export const api = {
@@ -313,12 +409,12 @@ export const api = {
 
   users: {
     list: () => request<{ users: AuthUser[] }>("/users"),
-    create: (input: any) =>
+    create: (input: UserInput) =>
       request<{ user: AuthUser }>("/users", {
         method: "POST",
         body: JSON.stringify(input),
       }),
-    update: (id: string, input: any) =>
+    update: (id: string, input: UserInput) =>
       request<{ user: AuthUser }>(`/users/${id}`, {
         method: "PUT",
         body: JSON.stringify(input),
@@ -374,6 +470,46 @@ export const api = {
     update: (id: number, input: ScoutEventInput) => request<{ event: ScoutEvent }>(`/events/${id}`, { method: "PUT", body: JSON.stringify(input) }),
     remove: (id: number) => request<void>(`/events/${id}`, { method: "DELETE" }),
     saveRegistrations: (id: number, scoutIds: string[]) => request<{ event: ScoutEvent; registrations: EventRegistration[] }>(`/events/${id}/registrations`, { method: "PUT", body: JSON.stringify({ scoutIds }) }),
+  },
+
+  gallery: {
+    photos: (filters: GalleryPhotoFilters = {}) =>
+      request<{ photos: GalleryPhoto[]; nextCursor: string | null }>(
+        `/gallery/photos${buildQuery({
+          albumId: filters.albumId,
+          cursor: filters.cursor,
+          limit: filters.limit,
+          mine: filters.mine || undefined,
+          search: filters.search,
+        })}`,
+      ),
+    summary: (limit = 4) =>
+      request<{ summary: GallerySummary }>(`/gallery/summary${buildQuery({ limit })}`),
+    albums: () => request<{ albums: GalleryAlbum[] }>("/gallery/albums"),
+    createAlbum: (name: string) =>
+      request<{ album: GalleryAlbum }>("/gallery/albums", {
+        method: "POST",
+        body: JSON.stringify({ name }),
+      }),
+    upload: (input: GalleryUploadInput) => {
+      const formData = new FormData();
+      for (const file of input.files) formData.append("photos", file);
+      if (input.caption?.trim()) formData.append("caption", input.caption.trim());
+      if (input.albumId) formData.append("albumId", String(input.albumId));
+      if (input.albumName?.trim()) formData.append("albumName", input.albumName.trim());
+      if (input.eventDate) formData.append("eventDate", input.eventDate);
+      return request<GalleryUploadResult>("/gallery/photos", {
+        method: "POST",
+        body: formData,
+      });
+    },
+    update: (id: number, input: { caption?: string; albumId?: number | null; eventDate?: string }) =>
+      request<{ photo: GalleryPhoto }>(`/gallery/photos/${id}`, {
+        method: "PUT",
+        body: JSON.stringify(input),
+      }),
+    remove: (id: number) =>
+      request<{ warning: string | null }>(`/gallery/photos/${id}`, { method: "DELETE" }),
   },
 };
 

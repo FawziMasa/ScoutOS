@@ -8,11 +8,11 @@ import "./Login.css";
 function ResetPassword() {
   const [searchParams] = useSearchParams();
   const urlToken = searchParams.get("token");
-  const [token, setToken] = useState(urlToken || sessionStorage.getItem("resetToken") || "");
+  const [storedToken] = useState(() => sessionStorage.getItem("resetToken") || "");
+  const token = urlToken || storedToken;
 
   useEffect(() => {
     if (urlToken) {
-      setToken(urlToken);
       sessionStorage.setItem("resetToken", urlToken);
     }
   }, [urlToken]);

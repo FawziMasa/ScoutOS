@@ -1,11 +1,15 @@
 type IconName =
   | "attendance"
+  | "arrowLeft"
+  | "arrowRight"
   | "calendar"
   | "check"
   | "chevron"
   | "dashboard"
   | "edit"
   | "events"
+  | "folder"
+  | "image"
   | "logout"
   | "menu"
   | "plus"
@@ -14,6 +18,7 @@ type IconName =
   | "shield"
   | "sparkles"
   | "trash"
+  | "upload"
   | "users"
   | "x";
 
@@ -32,6 +37,8 @@ const paths: Record<IconName, React.ReactNode> = {
       <path d="m8 14 2 2 4-4" />
     </>
   ),
+  arrowLeft: <path d="M19 12H5M12 19l-7-7 7-7" />,
+  arrowRight: <path d="M5 12h14M12 5l7 7-7 7" />,
   calendar: (
     <>
       <rect width="18" height="18" x="3" y="4" rx="2" />
@@ -59,6 +66,19 @@ const paths: Record<IconName, React.ReactNode> = {
       <path d="M15 2v4M9 2v4" />
       <rect width="18" height="18" x="3" y="4" rx="2" />
       <path d="M3 10h18M8 14h.01M12 14h.01M16 14h.01M8 18h.01M12 18h.01" />
+    </>
+  ),
+  folder: (
+    <>
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" />
+      <path d="M3 10h18" />
+    </>
+  ),
+  image: (
+    <>
+      <rect width="18" height="18" x="3" y="3" rx="2" />
+      <circle cx="8.5" cy="8.5" r="1.5" />
+      <path d="m21 15-5-5L5 21" />
     </>
   ),
   logout: (
@@ -97,6 +117,13 @@ const paths: Record<IconName, React.ReactNode> = {
   trash: (
     <>
       <path d="M3 6h18M8 6V4h8v2M19 6l-1 15H6L5 6M10 11v6M14 11v6" />
+    </>
+  ),
+  upload: (
+    <>
+      <path d="M12 16V4" />
+      <path d="m7 9 5-5 5 5" />
+      <path d="M20 16v3a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-3" />
     </>
   ),
   users: (

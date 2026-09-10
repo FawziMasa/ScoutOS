@@ -1,12 +1,29 @@
 import { useEffect, useState } from "react";
-import { api, type AuthUser, scoutUnits, type UserRole } from "../lib/api";
+import type { FormEvent } from "react";
+import { api, type AuthUser, scoutUnits, type ScoutUnit, type UserInput, type UserRole } from "../lib/api";
 import Icon from "../components/Icon";
+
+type UserForm = Omit<UserInput, "unit"> & {
+  password: string;
+  unit: ScoutUnit;
+};
+
+function createEmptyUserForm(): UserForm {
+  return {
+    fullName: "",
+    username: "",
+    email: "",
+    password: "",
+    role: "UNIT_LEADER",
+    unit: scoutUnits[0],
+  };
+}
 
 function Users() {
   const [users, setUsers] = useState<AuthUser[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState({ fullName: "", username: "", email: "", password: "", role: "UNIT_LEADER" as UserRole, unit: scoutUnits[0] });
+  const [form, setForm] = useState<UserForm>(createEmptyUserForm);
 
   const fetchUsers = async () => {
     const data = await api.users.list();
@@ -14,12 +31,12 @@ function Users() {
   };
 
   useEffect(() => {
-    fetchUsers();
+    api.users.list().then((data) => setUsers(data.users));
   }, []);
 
   const openEdit = (user: AuthUser) => {
     setEditingId(user.id);
-    setForm({ fullName: user.fullName, username: user.username, email: "", password: "", role: user.role, unit: (user.unit || scoutUnits[0]) as any });
+    setForm({ fullName: user.fullName, username: user.username, email: "", password: "", role: user.role, unit: user.unit || scoutUnits[0] });
     setModalOpen(true);
   };
 
@@ -29,7 +46,7 @@ function Users() {
     fetchUsers();
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     try {
       if (editingId) {
@@ -40,7 +57,7 @@ function Users() {
       alert(`Leader ${editingId ? 'updated' : 'created'} successfully!`);
       setModalOpen(false);
       setEditingId(null);
-      setForm({ fullName: "", username: "", email: "", password: "", role: "UNIT_LEADER", unit: scoutUnits[0] });
+      setForm(createEmptyUserForm());
       fetchUsers();
     } catch (err) {
       alert(err instanceof Error ? err.message : "Failed to save user.");
@@ -102,7 +119,7 @@ function Users() {
                     </label>
                     {form.role === "UNIT_LEADER" && (
                         <label className="field field-wide"><span>Unit</span>
-                            <select value={form.unit} onChange={e => setForm({...form, unit: e.target.value as any})}>
+                            <select value={form.unit} onChange={e => setForm({...form, unit: e.target.value as ScoutUnit})}>
                                 {scoutUnits.map(unit => <option key={unit} value={unit}>{unit}</option>)}
                             </select>
                         </label>

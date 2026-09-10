@@ -6,6 +6,7 @@ const links = [
   { path: "/dashboard", label: "Overview", icon: "dashboard" as const },
   { path: "/scouts", label: "Scouts", icon: "scouts" as const },
   { path: "/events", label: "Events", icon: "events" as const },
+  { path: "/gallery", label: "Gallery", icon: "image" as const },
   { path: "/attendance", label: "Attendance", icon: "attendance" as const },
   { path: "/leaderboard", label: "Leaderboard", icon: "shield" as const },
 ];
