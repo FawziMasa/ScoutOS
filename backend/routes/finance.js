@@ -2,15 +2,19 @@ import {
   approveFinanceTransaction,
   cancelFinanceTransaction,
   createFinanceTransaction,
+  deleteFinanceAttachment,
+  downloadFinanceAttachment,
   exportFinanceTransactions,
   financeSummary,
   financeTransactionHistory,
   getFinanceTransaction,
+  listFinanceTransactionAttachments,
   listFinanceTransactions,
   rejectFinanceTransaction,
   reverseFinanceTransaction,
   submitFinanceTransaction,
   updateFinanceTransaction,
+  uploadFinanceTransactionAttachment,
 } from "../controllers/financeController.js";
 
 export async function handleFinanceRoute(request, response, context) {
@@ -32,6 +36,22 @@ export async function handleFinanceRoute(request, response, context) {
 
   if (request.method === "GET" && path === "/api/finance/export.csv") {
     await exportFinanceTransactions(request, response, context);
+    return true;
+  }
+
+  const attachmentMatch = path.match(/^\/api\/finance\/attachments\/(\d+)$/);
+  if (attachmentMatch) {
+    if (request.method === "GET") await downloadFinanceAttachment(request, response, context, attachmentMatch[1]);
+    else if (request.method === "DELETE") await deleteFinanceAttachment(request, response, context, attachmentMatch[1]);
+    else return false;
+    return true;
+  }
+
+  const transactionAttachmentsMatch = path.match(/^\/api\/finance\/transactions\/(\d+)\/attachments$/);
+  if (transactionAttachmentsMatch) {
+    if (request.method === "GET") await listFinanceTransactionAttachments(request, response, context, transactionAttachmentsMatch[1]);
+    else if (request.method === "POST") await uploadFinanceTransactionAttachment(request, response, context, transactionAttachmentsMatch[1]);
+    else return false;
     return true;
   }
 

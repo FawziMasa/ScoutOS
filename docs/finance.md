@@ -22,6 +22,13 @@ financial audit context. The schema bootstrap is
 `backend/database/financeMigration.js`; the SQL reference is
 `database/20260911_create_finance_transactions.sql`.
 
+`finance_attachments` stores receipt PDFs/JPEGs/PNGs in MySQL with uploader,
+size, type, timestamps, and soft-deletion evidence. Files are limited to 5 MB
+and five active receipts per transaction. File signatures are checked instead
+of trusting browser MIME declarations. Downloads require an authenticated user
+who can access the linked transaction's unit and are always sent as attachments
+with `no-store` caching.
+
 ## Implemented API and screen
 
 | Method | Route | Purpose |
@@ -38,6 +45,8 @@ financial audit context. The schema bootstrap is
 | `GET` | `/api/finance/transactions/:id/history` | Read append-only status history |
 | `GET` | `/api/finance/summary` | Income, expenses, balance, debt, month, pending, count |
 | `GET` | `/api/finance/export.csv` | Export the same authorized/filtered rows as UTF-8 CSV |
+| `GET/POST` | `/api/finance/transactions/:id/attachments` | List or add draft receipt files |
+| `GET/DELETE` | `/api/finance/attachments/:id` | Authenticated download or soft removal |
 
 The Finance page provides live/manual refresh, a full or clearly filtered scope
 label, balance/debt state, totals, filters, transaction table, and create/view/
@@ -63,20 +72,10 @@ The backend derives the actor from the bearer session and derives Unit Leader
 scope from `user_units`. A submitted role, actor ID, or unauthorized unit is not
 trusted.
 
-## Receipt extension still required
+## Receipt storage boundary
 
-Receipt files should use the same storage-provider boundary as Gallery rather
-than Render's filesystem. Add a `finance_attachments` table with: `id`,
-`transaction_id`, `storage_key`, `file_url`, `original_filename`, `mime_type`,
-`file_size`, `uploaded_by`, and timestamps. Restrict types to PDF/JPEG/PNG,
-validate signatures server-side, cap file/request size, and cascade attachment
-metadata when a transaction is removed.
-
-Planned receipt routes:
-
-- `POST /api/finance/transactions/:id/attachments`
-- `GET /api/finance/transactions/:id/attachments`
-- `DELETE /api/finance/attachments/:id`
-
-Receipt storage should preserve the current authorization and audit contract
-rather than create a competing Finance module.
+Receipts never use Render's ephemeral filesystem. MySQL storage makes the
+feature work on the current deployment without a second paid service and is
+reasonable for this group's small, capped volume. Before receipt growth becomes
+material, move the binary storage behind the same external-provider boundary
+planned for Gallery while preserving attachment IDs and authorization.

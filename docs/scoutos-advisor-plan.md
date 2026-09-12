@@ -16,8 +16,11 @@ Date: 2026-09-12
   authorization and token tests.
 - Phase 3A Finance integrity is implemented: draft/submission/approval/rejection
   states, append-only history, cancellation instead of deletion, approved
-  reversals, approval evidence, and scope-safe CSV export. Receipt files remain
-  the next Finance slice.
+  reversals, approval evidence, and scope-safe CSV export.
+- Phase 3B receipt files are implemented with signature validation, strict size
+  and count caps, authenticated unit-scoped downloads, and soft removal. The
+  current MySQL binary store is intentionally a small-group bridge; external
+  object storage remains the scale target.
 
 ## Executive verdict
 

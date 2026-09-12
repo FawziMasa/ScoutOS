@@ -136,6 +136,16 @@ const checks = [
               OR reversal.status <> 'APPROVED' OR original.amount <> reversal.amount
               OR original.transaction_type = reversal.transaction_type)`,
   },
+  {
+    area: "Finance",
+    name: "Receipt files have valid metadata and transaction links",
+    tables: ["finance_attachments", "finance_transactions"],
+    sql: `SELECT COUNT(*) AS findings
+          FROM finance_attachments attachment
+          LEFT JOIN finance_transactions transaction_record ON transaction_record.id = attachment.transaction_id
+          WHERE transaction_record.id IS NULL OR attachment.file_size <= 0 OR attachment.file_size > 5000000
+            OR attachment.mime_type NOT IN ('application/pdf', 'image/jpeg', 'image/png')`,
+  },
 ];
 
 const requiredIndexes = [
@@ -144,6 +154,7 @@ const requiredIndexes = [
   "finance_transactions.idx_finance_transactions_unit_date",
   "finance_transactions.uq_finance_transactions_reversal",
   "finance_status_history.idx_finance_history_transaction",
+  "finance_attachments.idx_finance_attachments_transaction",
   "gallery_albums.idx_gallery_albums_unit",
   "gallery_photos.idx_gallery_photos_album",
   "password_reset_tokens.uq_password_reset_token_hash",

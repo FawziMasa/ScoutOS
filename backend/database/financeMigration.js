@@ -155,4 +155,29 @@ export async function ensureFinanceSchema() {
       SELECT 1 FROM finance_status_history history WHERE history.transaction_id = finance_record.id
     )
   `);
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS finance_attachments (
+      id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+      transaction_id INT NOT NULL,
+      original_filename VARCHAR(255) NOT NULL,
+      mime_type VARCHAR(80) NOT NULL,
+      file_size INT UNSIGNED NOT NULL,
+      file_data MEDIUMBLOB NOT NULL,
+      uploaded_by INT NULL,
+      created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      status ENUM('active', 'deleted') NOT NULL DEFAULT 'active',
+      deleted_by INT NULL,
+      deleted_at DATETIME NULL,
+      PRIMARY KEY (id),
+      INDEX idx_finance_attachments_transaction (transaction_id, status, created_at),
+      INDEX idx_finance_attachments_uploader (uploaded_by),
+      CONSTRAINT fk_finance_attachments_transaction
+        FOREIGN KEY (transaction_id) REFERENCES finance_transactions(id) ON DELETE RESTRICT,
+      CONSTRAINT fk_finance_attachments_uploader
+        FOREIGN KEY (uploaded_by) REFERENCES users(id) ON DELETE SET NULL,
+      CONSTRAINT fk_finance_attachments_deleter
+        FOREIGN KEY (deleted_by) REFERENCES users(id) ON DELETE SET NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+  `);
 }

@@ -230,6 +230,16 @@ export type FinanceStatusHistory = {
   createdAt: string;
 };
 
+export type FinanceAttachment = {
+  id: number;
+  transactionId: number;
+  filename: string;
+  mimeType: "application/pdf" | "image/jpeg" | "image/png";
+  fileSize: number;
+  uploadedBy: FinanceActor;
+  createdAt: string;
+};
+
 export type FinanceFilters = {
   search?: string;
   unit?: ScoutUnit | "";
@@ -433,6 +443,24 @@ async function request<T>(
   }
 
   return body as T;
+}
+
+async function requestBlob(path: string): Promise<Blob> {
+  const headers = new Headers();
+  const token = getToken();
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  let response: Response;
+  try {
+    response = await fetch(`${API_URL}${path}`, { headers });
+  } catch {
+    throw new Error("Network Error: ScoutOS backend is not reachable.");
+  }
+  if (!response.ok) {
+    if (response.status === 401) clearSession();
+    const body = await response.json().catch(() => ({}));
+    throw new Error(body.error || "Could not download this file.");
+  }
+  return response.blob();
 }
 
 function buildQuery(params: Record<string, string | number | boolean | null | undefined>) {
@@ -651,17 +679,18 @@ export const api = {
     cancel: (id: number, reason: string) => request<{ transaction: FinanceTransaction }>(`/finance/transactions/${id}/cancel`, { method: "POST", body: JSON.stringify({ reason }) }),
     reverse: (id: number, reason: string) => request<{ transaction: FinanceTransaction }>(`/finance/transactions/${id}/reverse`, { method: "POST", body: JSON.stringify({ reason }) }),
     history: (id: number) => request<{ history: FinanceStatusHistory[] }>(`/finance/transactions/${id}/history`),
-    exportCsv: async (filters: FinanceFilters = {}) => {
-      const headers = new Headers();
-      const token = getToken();
-      if (token) headers.set("Authorization", `Bearer ${token}`);
-      const response = await fetch(`${API_URL}/finance/export.csv${buildQuery(filters)}`, { headers });
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        throw new Error(body.error || "Could not export finance transactions.");
-      }
-      return response.blob();
+    exportCsv: (filters: FinanceFilters = {}) => requestBlob(`/finance/export.csv${buildQuery(filters)}`),
+    attachments: (id: number) => request<{ attachments: FinanceAttachment[] }>(`/finance/transactions/${id}/attachments`),
+    uploadAttachment: (id: number, file: File) => {
+      const formData = new FormData();
+      formData.append("receipt", file);
+      return request<{ attachment: FinanceAttachment }>(`/finance/transactions/${id}/attachments`, {
+        method: "POST",
+        body: formData,
+      });
     },
+    downloadAttachment: (id: number) => requestBlob(`/finance/attachments/${id}`),
+    removeAttachment: (id: number) => request<void>(`/finance/attachments/${id}`, { method: "DELETE" }),
   },
 
   gallery: {

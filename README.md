@@ -27,7 +27,8 @@ backend; frontend navigation is only the matching user experience.
 - Events and unit-scoped registration management.
 - Gallery albums, batch image upload, search, grid, and lightbox.
 - Finance drafts, Admin approvals, immutable status history, approved reversals,
-  scope-safe CSV export, totals, balance/debt state, filters, and refresh.
+  authenticated receipt files, scope-safe CSV export, totals, balance/debt
+  state, filters, and refresh.
 - Scout portal for own profile, points, and attendance history.
 
 ## Local development

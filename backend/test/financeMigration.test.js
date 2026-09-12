@@ -37,6 +37,7 @@ test("Finance migration widens, maps, then narrows legacy statuses without destr
     assert.ok(mapPending > mapCompleted);
     assert.ok(narrow > mapPending);
     assert.ok(statements.some((sql) => sql.includes("CREATE TABLE IF NOT EXISTS finance_status_history")));
+    assert.ok(statements.some((sql) => sql.includes("CREATE TABLE IF NOT EXISTS finance_attachments")));
     assert.ok(statements.some((sql) => sql.includes("Existing record imported into status history")));
     assert.equal(statements.some((sql) => /^(?:DROP|TRUNCATE|DELETE)\b/i.test(sql)), false);
   } finally {

@@ -11,11 +11,15 @@ const {
   approveTransaction,
   createTransaction,
   exportTransactionsCsv,
+  FINANCE_ATTACHMENT_MAX_BYTES,
+  getFinanceAttachment,
   getFinanceSummary,
   listTransactions,
   reverseTransaction,
   submitTransaction,
   updateTransaction,
+  validateFinanceAttachmentFile,
+  addFinanceAttachment,
 } = await import("../services/financeService.js");
 
 const unitLeader = { id: "12", role: "UNIT_LEADER", unit: "أشبال و زهرات" };
@@ -294,6 +298,60 @@ test("CSV export preserves authorization filters and neutralizes spreadsheet for
     assert.match(csv, /"'=HYPERLINK\(""bad""\)"/);
     assert.match(calls[0].sql, /t\.unit = \?/);
     assert.deepEqual(calls[0].values, ["أشبال و زهرات", "APPROVED"]);
+  } finally {
+    db.execute = originalExecute;
+  }
+});
+
+test("receipt validation trusts file signatures, not claimed content types", () => {
+  const pdf = validateFinanceAttachmentFile({
+    filename: "receipt.pdf",
+    contentType: "text/plain",
+    buffer: Buffer.from("%PDF-1.7\nreceipt"),
+  });
+  assert.equal(pdf.mimeType, "application/pdf");
+  assert.throws(
+    () => validateFinanceAttachmentFile({ filename: "fake.pdf", contentType: "application/pdf", buffer: Buffer.from("not a pdf") }),
+    (error) => error.status === 400,
+  );
+  assert.throws(
+    () => validateFinanceAttachmentFile({ filename: "large.pdf", buffer: Buffer.alloc(FINANCE_ATTACHMENT_MAX_BYTES + 1, 1) }),
+    (error) => error.status === 413,
+  );
+});
+
+test("receipts cannot be added after a transaction leaves draft review", async () => {
+  const mock = installTransactionalMock(async (sql) => {
+    if (sql.includes("SELECT t.*")) return [[transactionRow({ status: "SUBMITTED" })]];
+    throw new Error(`Unexpected write: ${sql}`);
+  });
+  try {
+    await assert.rejects(
+      () => addFinanceAttachment(8, { filename: "receipt.pdf", buffer: Buffer.from("%PDF-1.7\nreceipt") }, unitLeader),
+      (error) => error.status === 409,
+    );
+    assert.equal(mock.calls.some((call) => call.sql.includes("INSERT INTO finance_attachments")), false);
+  } finally {
+    mock.restore();
+  }
+});
+
+test("receipt download enforces the linked transaction's unit scope", async () => {
+  const originalExecute = db.execute;
+  db.execute = async () => [[{
+    id: 4,
+    transaction_id: 8,
+    original_filename: "receipt.pdf",
+    mime_type: "application/pdf",
+    file_size: 12,
+    file_data: Buffer.from("%PDF-1.7\n"),
+    unit: "مبتدئ",
+  }]];
+  try {
+    await assert.rejects(
+      () => getFinanceAttachment(4, unitLeader),
+      (error) => error.status === 403,
+    );
   } finally {
     db.execute = originalExecute;
   }

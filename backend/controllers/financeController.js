@@ -1,17 +1,23 @@
 import {
   approveTransaction,
+  addFinanceAttachment,
   cancelTransaction,
   createTransaction,
   exportTransactionsCsv,
+  FINANCE_ATTACHMENT_MAX_BYTES,
   getFinanceSummary,
+  getFinanceAttachment,
   getTransaction,
   listTransactionHistory,
+  listFinanceAttachments,
   listTransactions,
   rejectTransaction,
+  removeFinanceAttachment,
   reverseTransaction,
   submitTransaction,
   updateTransaction,
 } from "../services/financeService.js";
+import { parseMultipartRequest } from "../services/multipartForm.js";
 
 function errorStatus(error) {
   if (error?.code === "ER_DUP_ENTRY") return 409;
@@ -117,5 +123,58 @@ export async function exportFinanceTransactions(request, response, context) {
       "X-Content-Type-Options": "nosniff",
     });
     response.end(csv);
+  });
+}
+
+export async function listFinanceTransactionAttachments(_request, response, context, id) {
+  await run(response, context.send, async () => context.send(response, 200, {
+    attachments: await listFinanceAttachments(id, context.user),
+  }));
+}
+
+export async function uploadFinanceTransactionAttachment(request, response, context, id) {
+  await run(response, context.send, async () => {
+    const form = await parseMultipartRequest(request, {
+      maxBytes: FINANCE_ATTACHMENT_MAX_BYTES + 250_000,
+      maxFiles: 1,
+      uploadLabel: "Receipt uploads",
+      fileLabel: "receipt",
+    });
+    if (form.files.length !== 1) {
+      const error = new Error("Choose exactly one receipt file.");
+      error.status = 400;
+      throw error;
+    }
+    context.send(response, 201, {
+      attachment: await addFinanceAttachment(id, form.files[0], context.user),
+    });
+  });
+}
+
+function safeDownloadFilename(value) {
+  return String(value || "receipt")
+    .replace(/[^\x20-\x7E]/g, "_")
+    .replace(/["\\]/g, "_")
+    .slice(0, 180) || "receipt";
+}
+
+export async function downloadFinanceAttachment(_request, response, context, id) {
+  await run(response, context.send, async () => {
+    const attachment = await getFinanceAttachment(id, context.user);
+    response.writeHead(200, {
+      "Content-Type": attachment.mimeType,
+      "Content-Length": attachment.buffer.length,
+      "Content-Disposition": `attachment; filename="${safeDownloadFilename(attachment.filename)}"`,
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+    });
+    response.end(attachment.buffer);
+  });
+}
+
+export async function deleteFinanceAttachment(_request, response, context, id) {
+  await run(response, context.send, async () => {
+    await removeFinanceAttachment(id, context.user);
+    context.sendNoContent(response);
   });
 }

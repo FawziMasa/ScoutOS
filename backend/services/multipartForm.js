@@ -39,8 +39,10 @@ function appendField(fields, name, value) {
 
 export async function parseMultipartRequest(request, options = {}) {
   const boundary = parseBoundary(getContentType(request));
+  const uploadLabel = String(options.uploadLabel || "Photo uploads");
+  const fileLabel = String(options.fileLabel || "photos");
   if (!boundary) {
-    throw createMultipartError(400, "Photo uploads must use multipart form data.");
+    throw createMultipartError(400, `${uploadLabel} must use multipart form data.`);
   }
 
   const maxBytes = Number(options.maxBytes || 25_000_000);
@@ -84,7 +86,7 @@ export async function parseMultipartRequest(request, options = {}) {
     if (disposition.filename !== undefined) {
       if (!disposition.filename) continue;
       if (files.length >= maxFiles) {
-        throw createMultipartError(400, `Upload at most ${maxFiles} photos at a time.`);
+        throw createMultipartError(400, `Upload at most ${maxFiles} ${fileLabel} at a time.`);
       }
 
       files.push({

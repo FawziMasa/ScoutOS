@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import type { FormEvent } from "react";
+import type { ChangeEvent, FormEvent } from "react";
 import Icon from "../components/Icon";
 import {
   api,
@@ -9,6 +9,7 @@ import {
   getStoredUser,
   scoutUnits as configuredScoutUnits,
   type FinanceFilters,
+  type FinanceAttachment,
   type FinanceStatus,
   type FinanceStatusHistory,
   type FinanceSummary,
@@ -70,6 +71,10 @@ function formatTimestamp(value: string) {
   return new Date(value).toLocaleString("en-GB", { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
+function formatFileSize(bytes: number) {
+  return bytes >= 1_000_000 ? `${(bytes / 1_000_000).toFixed(1)} MB` : `${Math.max(1, Math.round(bytes / 1000))} KB`;
+}
+
 function titleCase(value: string) {
   return value.charAt(0) + value.slice(1).toLowerCase();
 }
@@ -97,6 +102,8 @@ function Finance() {
   const [saving, setSaving] = useState(false);
   const [actionBusyId, setActionBusyId] = useState<number | null>(null);
   const [history, setHistory] = useState<FinanceStatusHistory[]>([]);
+  const [attachments, setAttachments] = useState<FinanceAttachment[]>([]);
+  const [attachmentBusy, setAttachmentBusy] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
 
@@ -144,6 +151,7 @@ function Finance() {
     setReadOnly(false);
     setForm(createEmptyTransaction(defaultUnit));
     setHistory([]);
+    setAttachments([]);
     setError("");
     setNotice("");
     setModalOpen(true);
@@ -154,11 +162,15 @@ function Finance() {
     setReadOnly(viewOnly);
     setForm(inputFromTransaction(transaction));
     setHistory([]);
+    setAttachments([]);
     setError("");
     setModalOpen(true);
     void api.finance.history(transaction.id)
       .then((result) => setHistory(result.history))
-      .catch((historyError) => setError(historyError instanceof Error ? historyError.message : "Could not load transaction history."));
+      .catch((detailsError) => setError(detailsError instanceof Error ? detailsError.message : "Could not load transaction history."));
+    void api.finance.attachments(transaction.id)
+      .then((result) => setAttachments(result.attachments))
+      .catch((detailsError) => setError(detailsError instanceof Error ? detailsError.message : "Could not load receipt files."));
   };
 
   const closeModal = () => {
@@ -248,6 +260,54 @@ function Finance() {
       URL.revokeObjectURL(url);
     } catch (exportError) {
       setError(exportError instanceof Error ? exportError.message : "Could not export finance transactions.");
+    }
+  };
+
+  const uploadAttachment = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file || !editing) return;
+    try {
+      setAttachmentBusy(true);
+      setError("");
+      const { attachment } = await api.finance.uploadAttachment(editing.id, file);
+      setAttachments((current) => [...current, attachment]);
+    } catch (uploadError) {
+      setError(uploadError instanceof Error ? uploadError.message : "Could not upload this receipt.");
+    } finally {
+      setAttachmentBusy(false);
+    }
+  };
+
+  const downloadAttachment = async (attachment: FinanceAttachment) => {
+    try {
+      setAttachmentBusy(true);
+      setError("");
+      const blob = await api.finance.downloadAttachment(attachment.id);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = attachment.filename;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+    } catch (downloadError) {
+      setError(downloadError instanceof Error ? downloadError.message : "Could not download this receipt.");
+    } finally {
+      setAttachmentBusy(false);
+    }
+  };
+
+  const removeAttachment = async (attachment: FinanceAttachment) => {
+    if (!window.confirm(`Remove “${attachment.filename}” from this draft?`)) return;
+    try {
+      setAttachmentBusy(true);
+      setError("");
+      await api.finance.removeAttachment(attachment.id);
+      setAttachments((current) => current.filter((item) => item.id !== attachment.id));
+    } catch (removeError) {
+      setError(removeError instanceof Error ? removeError.message : "Could not remove this receipt.");
+    } finally {
+      setAttachmentBusy(false);
     }
   };
 
@@ -361,6 +421,10 @@ function Finance() {
                 <div><span>Approved by</span><strong>{editing.approvedBy?.fullName || "Not approved"}</strong><small>{editing.approvedAt ? formatTimestamp(editing.approvedAt) : "—"}</small></div>
               </div>}
               {editing?.rejectionReason && <div className="finance-rejection"><strong>Rejection reason</strong><p>{editing.rejectionReason}</p></div>}
+              {editing && <section className="finance-attachments">
+                <div className="finance-section-heading"><div><h3>Receipt files</h3><p>PDF, JPEG, or PNG · 5 MB maximum · up to 5 files</p></div>{["DRAFT", "REJECTED"].includes(editing.status) && <label className="button button-secondary finance-upload-button"><input accept="application/pdf,image/jpeg,image/png" disabled={attachmentBusy || attachments.length >= 5} onChange={uploadAttachment} type="file" />{attachmentBusy ? "Working…" : "Add receipt"}</label>}</div>
+                {attachments.length === 0 ? <p className="finance-section-empty">No receipt files attached.</p> : <div className="finance-attachment-list">{attachments.map((attachment) => <div key={attachment.id}><span><strong>{attachment.filename}</strong><small>{formatFileSize(attachment.fileSize)} · {attachment.uploadedBy?.fullName || "Former ScoutOS user"}</small></span><button disabled={attachmentBusy} onClick={() => { void downloadAttachment(attachment); }} type="button">Download</button>{["DRAFT", "REJECTED"].includes(editing.status) && <button className="danger" disabled={attachmentBusy} onClick={() => { void removeAttachment(attachment); }} type="button">Remove</button>}</div>)}</div>}
+              </section>}
               {editing && <section className="finance-history"><h3>Status history</h3>{history.length === 0 ? <p>Loading history…</p> : history.map((entry) => <div key={entry.id}><span className={`finance-status ${entry.toStatus.toLowerCase()}`}>{titleCase(entry.toStatus)}</span><p>{entry.reason || "Status updated"}</p><small>{entry.changedBy?.fullName || "System"} · {formatTimestamp(entry.createdAt)}</small></div>)}</section>}
               <div className="form-actions field-wide"><button className="button button-secondary" disabled={saving} type="button" onClick={closeModal}>{readOnly ? "Close" : "Cancel"}</button>{!readOnly && <button className="button button-primary" disabled={saving} type="submit"><Icon name="check" size={18} />{saving ? "Saving..." : editing ? "Save draft" : "Create draft"}</button>}</div>
             </form>

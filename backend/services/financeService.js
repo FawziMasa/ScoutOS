@@ -465,6 +465,151 @@ export async function listTransactionHistory(id, user) {
   }));
 }
 
+export const FINANCE_ATTACHMENT_MAX_BYTES = 5_000_000;
+export const FINANCE_ATTACHMENT_MAX_COUNT = 5;
+
+function attachmentType(buffer) {
+  if (buffer.length >= 5 && buffer.subarray(0, 5).toString("ascii") === "%PDF-") return "application/pdf";
+  if (buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return "image/jpeg";
+  if (buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return "image/png";
+  return null;
+}
+
+export function validateFinanceAttachmentFile(file) {
+  const buffer = Buffer.isBuffer(file?.buffer) ? file.buffer : Buffer.alloc(0);
+  if (buffer.length === 0) throw createHttpError(400, "Choose a non-empty receipt file.");
+  if (buffer.length > FINANCE_ATTACHMENT_MAX_BYTES) {
+    throw createHttpError(413, "Receipt files must be 5 MB or smaller.");
+  }
+  const mimeType = attachmentType(buffer);
+  if (!mimeType) throw createHttpError(400, "Receipt files must be PDF, JPEG, or PNG.");
+
+  const filename = String(file?.filename || "receipt")
+    .split(/[\\/]/)
+    .pop()
+    .replace(/[\u0000-\u001f\u007f]/g, "")
+    .trim();
+  if (!filename || filename.length > 255) {
+    throw createHttpError(400, "Receipt filename must be between 1 and 255 characters.");
+  }
+  return { buffer, filename, mimeType, fileSize: buffer.length };
+}
+
+function mapAttachment(row) {
+  return {
+    id: Number(row.id),
+    transactionId: Number(row.transaction_id),
+    filename: row.original_filename,
+    mimeType: row.mime_type,
+    fileSize: Number(row.file_size),
+    uploadedBy: row.uploaded_by ? {
+      id: String(row.uploaded_by),
+      fullName: row.uploaded_by_name || row.uploaded_by_username || "Former ScoutOS user",
+      username: row.uploaded_by_username || "",
+    } : null,
+    createdAt: row.created_at,
+  };
+}
+
+export async function listFinanceAttachments(id, user) {
+  const existing = await getAuthorizedTransaction(id, user);
+  const [rows] = await db.execute(
+    `SELECT attachment.id, attachment.transaction_id, attachment.original_filename,
+            attachment.mime_type, attachment.file_size, attachment.uploaded_by,
+            attachment.created_at, uploader.full_name AS uploaded_by_name,
+            uploader.username AS uploaded_by_username
+     FROM finance_attachments attachment
+     LEFT JOIN users uploader ON uploader.id = attachment.uploaded_by
+     WHERE attachment.transaction_id = ? AND attachment.status = 'active'
+     ORDER BY attachment.created_at ASC, attachment.id ASC`,
+    [existing.id],
+  );
+  return rows.map(mapAttachment);
+}
+
+export async function addFinanceAttachment(id, file, user) {
+  const validated = validateFinanceAttachmentFile(file);
+  const attachmentId = await withTransaction(async (connection) => {
+    const existing = await getAuthorizedTransaction(id, user, connection, true);
+    if (!["DRAFT", "REJECTED"].includes(existing.status)) {
+      throw createHttpError(409, "Receipts can be added only to draft or rejected transactions.");
+    }
+    const [current] = await connection.execute(
+      `SELECT id FROM finance_attachments
+       WHERE transaction_id = ? AND status = 'active' FOR UPDATE`,
+      [existing.id],
+    );
+    if (current.length >= FINANCE_ATTACHMENT_MAX_COUNT) {
+      throw createHttpError(400, `A transaction can have at most ${FINANCE_ATTACHMENT_MAX_COUNT} receipt files.`);
+    }
+    const [result] = await connection.execute(
+      `INSERT INTO finance_attachments
+        (transaction_id, original_filename, mime_type, file_size, file_data, uploaded_by, created_at, status)
+       VALUES (?, ?, ?, ?, ?, ?, NOW(), 'active')`,
+      [existing.id, validated.filename, validated.mimeType, validated.fileSize, validated.buffer, Number(user.id)],
+    );
+    return result.insertId;
+  });
+  return mapAttachment({
+    id: attachmentId,
+    transaction_id: normalizeId(id),
+    original_filename: validated.filename,
+    mime_type: validated.mimeType,
+    file_size: validated.fileSize,
+    uploaded_by: Number(user.id),
+    uploaded_by_name: user.fullName || user.full_name || user.username,
+    uploaded_by_username: user.username,
+    created_at: new Date().toISOString(),
+  });
+}
+
+export async function getFinanceAttachment(id, user) {
+  const attachmentId = normalizeId(id);
+  const [rows] = await db.execute(
+    `SELECT attachment.id, attachment.transaction_id, attachment.original_filename,
+            attachment.mime_type, attachment.file_size, attachment.file_data,
+            transaction_record.unit
+     FROM finance_attachments attachment
+     INNER JOIN finance_transactions transaction_record ON transaction_record.id = attachment.transaction_id
+     WHERE attachment.id = ? AND attachment.status = 'active' LIMIT 1`,
+    [attachmentId],
+  );
+  const attachment = rows[0];
+  if (!attachment) throw createHttpError(404, "Receipt file not found.");
+  assertCanAccessUnit(user, attachment.unit);
+  return {
+    filename: attachment.original_filename,
+    mimeType: attachment.mime_type,
+    fileSize: Number(attachment.file_size),
+    buffer: attachment.file_data,
+  };
+}
+
+export async function removeFinanceAttachment(id, user) {
+  const attachmentId = normalizeId(id);
+  await withTransaction(async (connection) => {
+    const [rows] = await connection.execute(
+      `SELECT attachment.id, transaction_record.unit, transaction_record.status AS transaction_status
+       FROM finance_attachments attachment
+       INNER JOIN finance_transactions transaction_record ON transaction_record.id = attachment.transaction_id
+       WHERE attachment.id = ? AND attachment.status = 'active' LIMIT 1 FOR UPDATE`,
+      [attachmentId],
+    );
+    const attachment = rows[0];
+    if (!attachment) throw createHttpError(404, "Receipt file not found.");
+    assertCanAccessUnit(user, attachment.unit);
+    if (!["DRAFT", "REJECTED"].includes(attachment.transaction_status)) {
+      throw createHttpError(409, "Receipts on submitted or approved records cannot be removed.");
+    }
+    await connection.execute(
+      `UPDATE finance_attachments
+       SET status = 'deleted', deleted_by = ?, deleted_at = NOW()
+       WHERE id = ?`,
+      [Number(user.id), attachmentId],
+    );
+  });
+}
+
 function csvCell(value) {
   const text = String(value ?? "");
   const safe = /^[=+\-@]/.test(text) ? `'${text}` : text;
