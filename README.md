@@ -109,8 +109,10 @@ the password-reset page with its query token.
 
 - Production must use a stable `JWT_SECRET`; otherwise sessions are invalidated
   when an ephemeral host regenerates the fallback secret.
-- Gmail password reset uses a Google App Password, SMTP port 587,
-  `SMTP_SECURE=false`, and IPv4 (`SMTP_FAMILY=4`).
+- Password reset uses Brevo SMTP with a verified sender, an SMTP key (not an API
+  key), port 2525, `SMTP_SECURE=false`, and IPv4 (`SMTP_FAMILY=4`).
+- Gallery media is served through one-hour signed links. Production should set
+  a stable `GALLERY_MEDIA_SECRET`, or it falls back to `JWT_SECRET`.
 - Gallery never relies on Render's local filesystem. Cloudinary is recommended;
   a persistent MySQL file table is the built-in fallback.
 - Account deletion is soft deactivation and Scout deletion is archival, keeping
@@ -119,4 +121,6 @@ the password-reset page with its query token.
 See [access control](docs/access-control.md),
 [password reset deployment](docs/password-reset.md),
 [Gallery](docs/gallery.md), [Finance](docs/finance.md), and the
-[security/regression audit](docs/security-regression-audit.md).
+[security/regression audit](docs/security-regression-audit.md). Production
+release, backup, restore, and rotation steps are in the
+[operations runbook](docs/operations.md).

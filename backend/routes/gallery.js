@@ -13,9 +13,15 @@ export async function handleGalleryRoute(request, response, context) {
   const { path } = context;
   if (!path.startsWith("/api/gallery")) return false;
 
-  const mediaMatch = path.match(/^\/api\/gallery\/media\/([^/]+)\/(?:image|thumbnail)$/);
+  const mediaMatch = path.match(/^\/api\/gallery\/media\/([^/]+)\/(image|thumbnail)$/);
   if (request.method === "GET" && mediaMatch) {
-    await serveGalleryMediaRecord(request, response, context, decodeURIComponent(mediaMatch[1]));
+    await serveGalleryMediaRecord(
+      request,
+      response,
+      context,
+      decodeURIComponent(mediaMatch[1]),
+      mediaMatch[2],
+    );
     return true;
   }
 

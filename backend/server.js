@@ -71,9 +71,15 @@ if (!tokenSecret) {
     }
 }
 
-await ensureCoreSchema().catch((error) => {
-  console.error("Database schema check failed:", error);
-});
+try {
+  await ensureCoreSchema();
+} catch (error) {
+  console.error("Database schema check failed; ScoutOS will not start.", {
+    code: String(error?.code || "DB_SCHEMA_FAILED").slice(0, 80),
+    message: String(error?.message || "Database schema initialization failed.").slice(0, 300),
+  });
+  process.exit(1);
+}
 
 function readStore() {
   try {

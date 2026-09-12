@@ -6,7 +6,8 @@ import {
 } from "../database/galleryMigration.js";
 import {
   deleteGalleryImage,
-  getDatabaseGalleryImage,
+  galleryMediaUrl,
+  getGalleryImage,
   persistGalleryImage,
   uploadGalleryImage,
 } from "./galleryStorage.js";
@@ -279,7 +280,9 @@ function mapAlbum(row) {
       ? { id: Number(row.unit_id), name: row.unit_name || row.album_unit_name || "" }
       : null,
     photoCount: Number(row.photo_count || 0),
-    coverThumbnailUrl: row.cover_thumbnail_url || null,
+    coverThumbnailUrl: row.cover_storage_key
+      ? galleryMediaUrl(row.cover_storage_key, "thumbnail")
+      : null,
     latestPhotoAt: formatDateTime(row.latest_photo_at),
     createdBy: row.created_by === null || row.created_by === undefined ? null : Number(row.created_by),
     createdAt: formatDateTime(row.created_at),
@@ -291,8 +294,8 @@ function mapPhoto(row, user = null) {
   return {
     id: Number(row.id),
     storageKey: row.storage_key,
-    imageUrl: row.image_url,
-    thumbnailUrl: row.thumbnail_url || row.image_url,
+    imageUrl: galleryMediaUrl(row.storage_key, "image"),
+    thumbnailUrl: galleryMediaUrl(row.storage_key, "thumbnail"),
     caption: row.caption || "",
     albumId: Number(row.album_id),
     albumName: row.album_name || DEFAULT_GALLERY_ALBUM_NAME,
@@ -320,8 +323,8 @@ function mapPhoto(row, user = null) {
   };
 }
 
-export async function getGalleryMedia(storageKey) {
-  const image = await getDatabaseGalleryImage(storageKey);
+export async function getGalleryMedia(storageKey, variant) {
+  const image = await getGalleryImage(storageKey, variant);
   if (!image) {
     throw createHttpError(404, "Gallery image not found.");
   }
@@ -479,6 +482,7 @@ export async function listGalleryAlbums() {
         a.created_at,
         a.updated_at,
         COALESCE(stats.photo_count, 0) AS photo_count,
+        cover.storage_key AS cover_storage_key,
         cover.thumbnail_url AS cover_thumbnail_url,
         cover.created_at AS latest_photo_at
       FROM gallery_albums a

@@ -1,7 +1,9 @@
-import { createHash } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import db from "../database/db.js";
 
 const databaseStoragePrefix = "mysql-";
+const fallbackMediaSecret = randomBytes(32).toString("base64url");
+export const GALLERY_MEDIA_URL_TTL_SECONDS = 60 * 60;
 
 function createStorageError(status, message) {
   const error = new Error(message);
@@ -76,10 +78,75 @@ function publicBackendUrl() {
   return String(configured).replace(/\/$/, "");
 }
 
-function databaseMediaUrl(storageKey, variant) {
+function galleryMediaSecret(override) {
+  return String(
+    override ||
+      process.env.GALLERY_MEDIA_SECRET ||
+      process.env.JWT_SECRET ||
+      process.env.APP_SECRET ||
+      fallbackMediaSecret,
+  );
+}
+
+function normalizeMediaVariant(variant) {
+  if (variant !== "image" && variant !== "thumbnail") {
+    throw createStorageError(400, "Gallery media variant is invalid.");
+  }
+  return variant;
+}
+
+function mediaSignature(storageKey, variant, expires, secret) {
+  return createHmac("sha256", secret)
+    .update(`${storageKey}\n${variant}\n${expires}`)
+    .digest("base64url");
+}
+
+export function galleryMediaUrl(storageKey, variant, options = {}) {
+  const normalizedVariant = normalizeMediaVariant(variant);
+  const nowSeconds = Number.isFinite(options.nowSeconds)
+    ? Math.floor(options.nowSeconds)
+    : Math.floor(Date.now() / 1000);
+  const ttlSeconds = Number.isFinite(options.ttlSeconds)
+    ? Math.max(1, Math.min(Math.floor(options.ttlSeconds), GALLERY_MEDIA_URL_TTL_SECONDS))
+    : GALLERY_MEDIA_URL_TTL_SECONDS;
+  const expires = nowSeconds + ttlSeconds;
+  const signature = mediaSignature(
+    String(storageKey),
+    normalizedVariant,
+    expires,
+    galleryMediaSecret(options.secret),
+  );
   const path = `/api/gallery/media/${encodeURIComponent(storageKey)}/${variant}`;
   const baseUrl = publicBackendUrl();
-  return baseUrl ? `${baseUrl}${path}` : path;
+  const query = new URLSearchParams({ expires: String(expires), signature });
+  return `${baseUrl ? `${baseUrl}${path}` : path}?${query}`;
+}
+
+export function verifyGalleryMediaUrl({ storageKey, variant, expires, signature }, options = {}) {
+  let normalizedVariant;
+  try {
+    normalizedVariant = normalizeMediaVariant(variant);
+  } catch {
+    return false;
+  }
+
+  const expiration = Number(expires);
+  const nowSeconds = Number.isFinite(options.nowSeconds)
+    ? Math.floor(options.nowSeconds)
+    : Math.floor(Date.now() / 1000);
+  if (!Number.isInteger(expiration) || expiration <= nowSeconds) return false;
+  if (expiration > nowSeconds + GALLERY_MEDIA_URL_TTL_SECONDS) return false;
+
+  const expected = Buffer.from(
+    mediaSignature(
+      String(storageKey),
+      normalizedVariant,
+      expiration,
+      galleryMediaSecret(options.secret),
+    ),
+  );
+  const received = Buffer.from(String(signature || ""));
+  return expected.length === received.length && timingSafeEqual(expected, received);
 }
 
 async function uploadCloudinaryGalleryImage(file, publicId) {
@@ -128,8 +195,8 @@ function uploadDatabaseGalleryImage(file, publicId) {
   return {
     provider: "mysql",
     storageKey,
-    imageUrl: databaseMediaUrl(storageKey, "image"),
-    thumbnailUrl: databaseMediaUrl(storageKey, "thumbnail"),
+    imageUrl: galleryMediaUrl(storageKey, "image"),
+    thumbnailUrl: galleryMediaUrl(storageKey, "thumbnail"),
     width: file.width,
     height: file.height,
     bytes: file.size,
@@ -195,6 +262,53 @@ export async function getDatabaseGalleryImage(storageKey) {
     buffer: image.image_data,
     filename: image.original_filename || "gallery-photo",
     updatedAt: image.updated_at,
+  };
+}
+
+export async function getGalleryImage(storageKey, variant) {
+  const normalizedVariant = normalizeMediaVariant(variant);
+  if (String(storageKey || "").startsWith(databaseStoragePrefix)) {
+    return getDatabaseGalleryImage(storageKey);
+  }
+
+  const [rows] = await db.execute(
+    `SELECT image_url, thumbnail_url, original_filename, mime_type, updated_at
+     FROM gallery_photos
+     WHERE storage_key = ? AND status = 'active'
+     LIMIT 1`,
+    [storageKey],
+  );
+  const photo = rows[0];
+  if (!photo) return null;
+
+  const target = normalizedVariant === "thumbnail"
+    ? photo.thumbnail_url || photo.image_url
+    : photo.image_url;
+  let targetUrl;
+  try {
+    targetUrl = new URL(target);
+  } catch {
+    throw createStorageError(502, "Gallery storage returned an invalid media URL.");
+  }
+  if (targetUrl.protocol !== "https:" || !/(^|\.)res\.cloudinary\.com$/i.test(targetUrl.hostname)) {
+    throw createStorageError(502, "Gallery storage returned an untrusted media URL.");
+  }
+
+  const response = await fetch(targetUrl);
+  if (!response.ok) {
+    throw createStorageError(502, "Gallery storage could not retrieve this image.");
+  }
+  const contentType = response.headers.get("content-type") || photo.mime_type || "application/octet-stream";
+  if (!contentType.toLowerCase().startsWith("image/")) {
+    throw createStorageError(502, "Gallery storage returned a non-image response.");
+  }
+  const buffer = Buffer.from(await response.arrayBuffer());
+  return {
+    contentType,
+    fileSize: buffer.length,
+    buffer,
+    filename: photo.original_filename || "gallery-photo",
+    updatedAt: photo.updated_at,
   };
 }
 

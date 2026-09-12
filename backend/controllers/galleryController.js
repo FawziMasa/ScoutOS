@@ -10,6 +10,7 @@ import {
   updateGalleryPhoto,
   uploadGalleryPhotos,
 } from "../services/galleryService.js";
+import { verifyGalleryMediaUrl } from "../services/galleryStorage.js";
 import { parseMultipartRequest } from "../services/multipartForm.js";
 
 function errorStatus(error) {
@@ -93,14 +94,27 @@ export async function getGallerySummaryRecord(request, response, context) {
   });
 }
 
-export async function serveGalleryMediaRecord(_request, response, context, storageKey) {
+export async function serveGalleryMediaRecord(request, response, context, storageKey, variant) {
   await run(response, context.send, async () => {
-    const image = await getGalleryMedia(storageKey);
+    const url = new URL(request.url, "http://localhost");
+    if (!verifyGalleryMediaUrl({
+      storageKey,
+      variant,
+      expires: url.searchParams.get("expires"),
+      signature: url.searchParams.get("signature"),
+    })) {
+      const error = new Error("Gallery media link is invalid or has expired.");
+      error.status = 401;
+      throw error;
+    }
+
+    const image = await getGalleryMedia(storageKey, variant);
     response.writeHead(200, {
       "Content-Type": image.contentType,
       "Content-Length": image.fileSize,
-      "Cache-Control": "public, max-age=31536000, immutable",
+      "Cache-Control": "private, max-age=3600",
       "X-Content-Type-Options": "nosniff",
+      "Referrer-Policy": "no-referrer",
     });
     response.end(image.buffer);
   });

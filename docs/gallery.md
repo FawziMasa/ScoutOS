@@ -3,6 +3,7 @@
 The Gallery provides albums, a responsive photo grid, search and album filters,
 batch upload, a keyboard-friendly lightbox, and photo detail editing. Scouts can
 view Gallery content; mutations remain leader-only and are enforced by the API.
+Raw media is exposed only through signed links that expire after one hour.
 
 ## Data model
 
@@ -50,11 +51,16 @@ CLOUDINARY_API_KEY=your-cloudinary-api-key
 CLOUDINARY_API_SECRET=your-cloudinary-api-secret
 CLOUDINARY_GALLERY_FOLDER=scoutos/gallery
 BACKEND_PUBLIC_URL=https://your-scoutos-backend.onrender.com
+GALLERY_MEDIA_SECRET=replace-with-a-long-random-secret
 ```
 
 `CLOUDINARY_API_SECRET` stays on the backend. Never expose it through a Vite
 environment variable. `BACKEND_PUBLIC_URL` is used for MySQL-backed media URLs
 when ScoutOS is behind Render.
+
+Cloudinary delivery URLs are proxied through ScoutOS so public provider URLs are
+not returned to browsers. `GALLERY_MEDIA_SECRET` signs temporary media links;
+when omitted it falls back to `JWT_SECRET`.
 
 ## Upload validation
 

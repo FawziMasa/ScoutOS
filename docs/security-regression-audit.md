@@ -17,7 +17,7 @@ passed. No live production credentials or inbox were used during this audit.
 | Finance | Scout/outside-unit access and total math | Denied/correct scope | Scoped service tests and whole-balance/debt calculation pass | Pass | All routes use authenticated unit scope |
 | Frontend | Role routes, Arabic content, responsive build | No TS/lint regression | Vite production build and ESLint pass | Pass | Role-aware routes/navigation and responsive filters |
 | Database | Orphans, duplicate pairs, required indexes | Zero findings | Read-only audit command added; production execution needs DB environment | Manual | Run `npm run migrate` then `npm run audit:data` on Render |
-| Email delivery | Real Gmail handoff and inbox receipt | Provider accepts and email arrives | Not testable without the deployed SMTP account and recipient inbox | Manual | Verify Render SMTP variables, request one reset, confirm inbox |
+| Email delivery | Real Brevo handoff and inbox receipt | Provider accepts and email arrives | Verified through Render, Brevo, and a real inbox on 2026-09-12 | Pass | Keep the sender verified and rotate exposed SMTP keys |
 
 ## Vulnerabilities corrected
 
@@ -31,9 +31,8 @@ passed. No live production credentials or inbox were used during this audit.
 
 ## Remaining operational work and debt
 
-Run the live read-only data audit after the production migration. Confirm a real
-password-reset message reaches an inbox; an HTTP generic success response is not
-delivery proof. Cloudinary is recommended before Gallery volume grows. Finance
+Run the live read-only data audit after the production migration. Brevo SMTP and
+real inbox delivery are confirmed. Cloudinary is recommended before Gallery volume grows. Finance
 receipt attachments, append-only approval history, and export remain documented
 extensions; current transaction deletion is still a hard delete and should move
 to reversal/archival before formal accounting use.
