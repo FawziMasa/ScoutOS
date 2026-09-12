@@ -39,22 +39,33 @@ async function addColumnIfMissing(name, definition) {
 async function ensureStatusModel() {
   const status = await columnRecord("finance_transactions", "status");
   const type = String(status?.column_type || "").toLowerCase();
-  if (type.includes("'completed'") || type.includes("'pending'")) {
-    await db.execute(`
-      ALTER TABLE finance_transactions
-      MODIFY COLUMN status ENUM('DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED', 'CANCELLED', 'COMPLETED', 'PENDING')
-      NOT NULL DEFAULT 'DRAFT'
-    `);
-    await db.execute("UPDATE finance_transactions SET status = 'APPROVED' WHERE status = 'COMPLETED'");
-    await db.execute("UPDATE finance_transactions SET status = 'SUBMITTED' WHERE status = 'PENDING'");
-  }
-  if (!type.includes("'draft'") || type.includes("'completed'") || type.includes("'pending'")) {
-    await db.execute(`
-      ALTER TABLE finance_transactions
-      MODIFY COLUMN status ENUM('DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED', 'CANCELLED')
-      NOT NULL DEFAULT 'DRAFT'
-    `);
-  }
+  const currentValues = [...type.matchAll(/'([^']+)'/g)].map((match) => match[1]);
+  const expectedValues = financeStatuses.map((value) => value.toLowerCase());
+  if (type.startsWith("enum(") && JSON.stringify(currentValues) === JSON.stringify(expectedValues)) return;
+
+  // VARCHAR is a restart-safe bridge for ENUM, VARCHAR, and partially migrated production schemas.
+  await db.execute(`
+    ALTER TABLE finance_transactions
+    MODIFY COLUMN status VARCHAR(20) NULL
+  `);
+  await db.execute(`
+    UPDATE finance_transactions
+    SET status = CASE UPPER(TRIM(COALESCE(status, '')))
+      WHEN 'COMPLETED' THEN 'APPROVED'
+      WHEN 'PENDING' THEN 'SUBMITTED'
+      WHEN 'DRAFT' THEN 'DRAFT'
+      WHEN 'SUBMITTED' THEN 'SUBMITTED'
+      WHEN 'APPROVED' THEN 'APPROVED'
+      WHEN 'REJECTED' THEN 'REJECTED'
+      WHEN 'CANCELLED' THEN 'CANCELLED'
+      ELSE 'DRAFT'
+    END
+  `);
+  await db.execute(`
+    ALTER TABLE finance_transactions
+    MODIFY COLUMN status ENUM('DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED', 'CANCELLED')
+    NOT NULL DEFAULT 'DRAFT'
+  `);
 }
 
 export async function ensureFinanceSchema() {
