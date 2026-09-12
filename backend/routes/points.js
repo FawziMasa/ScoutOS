@@ -7,7 +7,7 @@ import {
 export async function handlePointsRoute(request, response, context) {
   const { path } = context;
 
-  if (!path.startsWith("/api/points")) {
+  if (!path.startsWith("/api/points") && !path.startsWith("/api/scouts/")) {
     return false;
   }
 
@@ -21,7 +21,9 @@ export async function handlePointsRoute(request, response, context) {
     return true;
   }
 
-  const scoutPointsMatch = path.match(/^\/api\/scouts\/([a-zA-Z0-9-]+)\/points$/);
+  const scoutPointsMatch =
+    path.match(/^\/api\/points\/scouts\/([a-zA-Z0-9-]+)\/history$/) ||
+    path.match(/^\/api\/scouts\/([a-zA-Z0-9-]+)\/points$/);
 
   if (request.method === "GET" && scoutPointsMatch) {
     await getScoutPointsController(request, response, context, scoutPointsMatch[1]);

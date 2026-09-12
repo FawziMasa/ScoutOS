@@ -10,13 +10,13 @@ import {
   persistGalleryImage,
   uploadGalleryImage,
 } from "./galleryStorage.js";
+import { isGlobalLeader, isOperationalLeader } from "./authorizationService.js";
 
 export const MAX_GALLERY_FILES = 10;
 export const MAX_GALLERY_FILE_SIZE = 12 * 1024 * 1024;
 export const MAX_GALLERY_UPLOAD_BYTES = MAX_GALLERY_FILES * MAX_GALLERY_FILE_SIZE + 1_000_000;
 
 const allowedImageTypes = new Set(["image/jpeg", "image/png", "image/webp"]);
-const manageableRoles = new Set(["ADMIN", "GROUP_LEADER"]);
 
 export function createHttpError(status, message) {
   const error = new Error(message);
@@ -67,11 +67,13 @@ function normalizeLimit(value) {
 }
 
 function canCreateAlbums(user) {
-  return manageableRoles.has(user.role);
+  return isGlobalLeader(user);
 }
 
 function canManagePhoto(user, photo) {
-  return manageableRoles.has(user.role) || String(user.id) === String(photo.uploaded_by);
+  return isOperationalLeader(user) && (
+    isGlobalLeader(user) || String(user.id) === String(photo.uploaded_by)
+  );
 }
 
 function formatDateOnly(value) {
@@ -495,6 +497,9 @@ export async function getGallerySummary(user, limit = 4) {
 }
 
 export async function uploadGalleryPhotos({ fields, files }, user) {
+  if (!isOperationalLeader(user)) {
+    throw createHttpError(403, "Scout accounts can view Gallery photos but cannot upload them.");
+  }
   const photoFiles = files.filter((file) =>
     ["photos", "photos[]", "images", "image"].includes(file.fieldName),
   );

@@ -16,6 +16,7 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ensureCoreSchema } from "./database/schema.js";
+import { defaultUnitNames } from "./database/accessMigration.js";
 import db from "./database/db.js";
 import { handleAttendanceRoute } from "./routes/attendance.js";
 import { handleEventRoute } from "./routes/events.js";
@@ -28,6 +29,18 @@ import {
 } from "./controllers/passwordResetController.js";
 import { safeEmailError, verifyEmailConfiguration } from "./services/emailService.js";
 import { normalizeEmail } from "./services/passwordResetService.js";
+import {
+  LEADER_ROLES,
+  USER_ROLES,
+  assignedUnitNames,
+  assertScoutManageAccess,
+  assertScoutReadAccess,
+  hydrateUserAccess,
+  listActiveUnits,
+  permissionsFor,
+  requireAnyRole,
+  userHasUnitAccess,
+} from "./services/authorizationService.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const dataDirectory = process.env.DATA_DIR
@@ -38,8 +51,8 @@ const secretPath = join(dataDirectory, ".secret");
 const port = Number(process.env.PORT || 4000);
 const allowedOrigin = process.env.FRONTEND_URL || "http://localhost:5173";
 
-const roles = ["ADMIN", "GROUP_LEADER", "UNIT_LEADER"];
-const units = ["أشبال و زهرات", "مبتدئ", "متقدم", "جوالة", "قيادة"];
+const roles = USER_ROLES;
+const units = defaultUnitNames;
 const loginAttempts = new Map();
 
 mkdirSync(dataDirectory, { recursive: true });
@@ -160,6 +173,7 @@ function signToken(user) {
     sub: user.id,
     role: user.role,
     unit: user.unit,
+    scoutId: user.scoutId || null,
     sessionVersion: Number(user.sessionVersion ?? user.session_version ?? 0),
     expiresAt: Date.now() + 12 * 60 * 60 * 1000,
   });
@@ -194,8 +208,12 @@ function publicUser(user) {
     id: String(user.id),
     fullName: user.fullName || user.full_name,
     username: user.username,
+    email: user.email || "",
     role: user.role,
     unit: user.unit ?? user.unit_id ?? null,
+    assignedUnits: Array.isArray(user.assignedUnits) ? user.assignedUnits : [],
+    scoutId: user.scoutId || user.scout_id || null,
+    permissions: user.permissions || permissionsFor(user),
     active: Boolean(user.active),
     createdAt: user.createdAt || user.created_at,
   };
@@ -219,41 +237,133 @@ async function authenticate(request) {
   );
 
   const account = rows[0];
-  if (!account || Number(claims.sessionVersion ?? 0) !== Number(account.session_version ?? 0)) {
+  if (
+    !account ||
+    !Boolean(account.active) ||
+    Number(claims.sessionVersion ?? 0) !== Number(account.session_version ?? 0)
+  ) {
     return null;
   }
 
-  return publicUser(account);
+  const user = await hydrateUserAccess(db, account);
+  if (user.role === "SCOUT") {
+    if (!user.scoutId) return null;
+    const [scouts] = await db.execute(
+      "SELECT id FROM scouts WHERE id = ? AND status = 'Active' LIMIT 1",
+      [user.scoutId],
+    );
+    if (scouts.length === 0) return null;
+  }
+  return user;
 }
 
-function canAccessScout(user, scout) {
-  return (
-    user.role === "ADMIN" ||
-    user.role === "GROUP_LEADER" ||
-    user.unit === scout.unit
-  );
+function createHttpError(status, message) {
+  const error = new Error(message);
+  error.status = status;
+  return error;
 }
 
-function validateAccount(body, firstAccount = false) {
+function validateAccount(body, firstAccount = false, editing = false) {
   const fullName = String(body.fullName || "").trim();
   const username = String(body.username || "").trim().toLowerCase();
   const email = normalizeEmail(body.email);
   const password = String(body.password || "");
   const role = firstAccount ? "ADMIN" : String(body.role || "");
-  const unit = role === "UNIT_LEADER" ? String(body.unit || "") : null;
+  const unit = role === "UNIT_LEADER" ? String(body.unit || "").trim() : null;
+  const rawUnitIds = body.assignedUnitIds ?? body.unitIds ?? [];
+  const assignedUnitIds = Array.isArray(rawUnitIds)
+    ? [...new Set(rawUnitIds.map(Number).filter((id) => Number.isInteger(id) && id > 0))]
+    : [];
+  const scoutId = role === "SCOUT" ? String(body.scoutId || "").trim() : null;
+  const active = body.active === undefined ? true : Boolean(body.active);
 
   if (fullName.length < 2) return { error: "Full name is required." };
   if (!/^[a-zA-Z0-9._-]{3,30}$/.test(username)) {
     return { error: "Username must be 3-30 letters, numbers, dots, dashes, or underscores." };
   }
   if (!email) return { error: "A valid email address is required." };
-  if (password.length < 8) return { error: "Password must be at least 8 characters." };
+  if ((!editing || password) && password.length < 8) {
+    return { error: "Password must be at least 8 characters." };
+  }
   if (!roles.includes(role)) return { error: "Invalid role." };
-  if (role === "UNIT_LEADER" && !units.includes(unit)) {
-    return { error: "A Unit Leader must be assigned to a valid unit." };
+  if (role === "UNIT_LEADER" && assignedUnitIds.length === 0 && !units.includes(unit)) {
+    return { error: "A Unit Leader must be assigned to at least one valid unit." };
+  }
+  if (role === "SCOUT" && !scoutId) {
+    return { error: "A Scout account must be linked to an existing Scout." };
   }
 
-  return { value: { fullName, username, email, password, role, unit } };
+  return {
+    value: { fullName, username, email, password, role, unit, assignedUnitIds, scoutId, active },
+  };
+}
+
+async function resolveAccountUnits(connection, account) {
+  if (account.role !== "UNIT_LEADER") return [];
+
+  let rows;
+  if (account.assignedUnitIds.length > 0) {
+    const placeholders = account.assignedUnitIds.map(() => "?").join(", ");
+    [rows] = await connection.execute(
+      `SELECT id, name FROM units WHERE active = 1 AND id IN (${placeholders}) ORDER BY display_order, name`,
+      account.assignedUnitIds,
+    );
+    if (rows.length !== account.assignedUnitIds.length) {
+      throw createHttpError(400, "One or more assigned units are invalid or inactive.");
+    }
+  } else {
+    [rows] = await connection.execute(
+      "SELECT id, name FROM units WHERE active = 1 AND name = ? LIMIT 1",
+      [account.unit],
+    );
+    if (rows.length !== 1) throw createHttpError(400, "The assigned unit is invalid or inactive.");
+  }
+  return rows.map((row) => ({ id: Number(row.id), name: row.name }));
+}
+
+async function replaceUserUnits(connection, userId, assignedUnits) {
+  await connection.execute("DELETE FROM user_units WHERE user_id = ?", [userId]);
+  for (const unit of assignedUnits) {
+    await connection.execute(
+      "INSERT INTO user_units (user_id, unit_id, created_at) VALUES (?, ?, NOW())",
+      [userId, unit.id],
+    );
+  }
+}
+
+async function assertScoutLinkAvailable(connection, account, excludedUserId = null) {
+  if (account.role !== "SCOUT") return;
+  const [scouts] = await connection.execute(
+    "SELECT id FROM scouts WHERE id = ? AND status = 'Active' LIMIT 1",
+    [account.scoutId],
+  );
+  if (scouts.length === 0) throw createHttpError(400, "The selected active Scout does not exist.");
+
+  const params = [account.scoutId];
+  let sql = "SELECT id FROM users WHERE scout_id = ?";
+  if (excludedUserId !== null) {
+    sql += " AND id <> ?";
+    params.push(excludedUserId);
+  }
+  sql += " LIMIT 1";
+  const [existing] = await connection.execute(sql, params);
+  if (existing.length > 0) throw createHttpError(409, "That Scout already has a login account.");
+}
+
+function scoutListScope(user) {
+  if (user.role === "ADMIN" || user.role === "GROUP_LEADER") return { where: "", values: [] };
+  if (user.role === "UNIT_LEADER") {
+    const unitNames = assignedUnitNames(user);
+    if (unitNames.length === 0) return { where: " WHERE 1 = 0", values: [] };
+    return {
+      where: ` WHERE unit IN (${unitNames.map(() => "?").join(", ")})`,
+      values: unitNames,
+    };
+  }
+  if (user.role === "SCOUT" && user.scoutId) {
+    return { where: " WHERE id = ?", values: [user.scoutId] };
+  }
+  return { where: " WHERE 1 = 0", values: [] };
 }
 
 function validateScout(body) {
@@ -311,7 +421,11 @@ const server = createServer(async (request, response) => {
     }
 
     if (request.method === "GET" && path === "/api/units") {
-      return send(response, 200, { units });
+      const unitRecords = await listActiveUnits(db);
+      return send(response, 200, {
+        units: unitRecords.map((unit) => unit.name),
+        unitRecords,
+      });
     }
 
     if (request.method === "GET" && path === "/api/auth/setup-status") {
@@ -332,8 +446,8 @@ const server = createServer(async (request, response) => {
       const [result] = await db.execute(
         `
           INSERT INTO users
-            (full_name, username, email, password_hash, role, unit, active, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, 1, NOW())
+            (full_name, username, email, password_hash, role, unit, scout_id, active, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, NULL, 1, NOW())
         `,
         [
           validation.value.fullName,
@@ -349,8 +463,11 @@ const server = createServer(async (request, response) => {
         id: result.insertId,
         fullName: validation.value.fullName,
         username: validation.value.username,
+        email: validation.value.email,
         role: validation.value.role,
         unit: validation.value.unit,
+        assignedUnits: [],
+        scoutId: null,
         active: true,
         createdAt: new Date().toISOString(),
       };
@@ -380,6 +497,10 @@ const server = createServer(async (request, response) => {
       const username = String(body.username || "").trim().toLowerCase();
       const password = String(body.password || "");
 
+      if (isRateLimited(username || "unknown")) {
+        return send(response, 429, { error: "Too many sign-in attempts. Please wait a minute." });
+      }
+
       const [rows] = await db.execute(
         "SELECT * FROM users WHERE username = ? LIMIT 1",
         [username]
@@ -387,7 +508,8 @@ const server = createServer(async (request, response) => {
 
       const account = rows[0];
 
-      if (!account) {
+      if (!account || !Boolean(account.active)) {
+        recordFailedLogin(username || "unknown");
         return send(response, 401, {
           error: "Incorrect username or password.",
         });
@@ -396,21 +518,24 @@ const server = createServer(async (request, response) => {
       if (
         !verifyPassword(password, account.password_hash)
       ) {
+        recordFailedLogin(username || "unknown");
         return send(response, 401, {
           error: "Incorrect username or password.",
         });
       }
 
-      const authUser = {
-        id: String(account.id),
-        fullName: account.full_name,
-        username: account.username,
-        role: account.role,
-        unit: account.unit ?? account.unit_id ?? null,
-        active: Boolean(account.active),
-        sessionVersion: Number(account.session_version ?? 0),
-        createdAt: account.created_at,
-      };
+      const authUser = await hydrateUserAccess(db, account);
+      if (authUser.role === "SCOUT") {
+        const [linkedScouts] = await db.execute(
+          "SELECT id FROM scouts WHERE id = ? AND status = 'Active' LIMIT 1",
+          [authUser.scoutId],
+        );
+        if (!authUser.scoutId || linkedScouts.length === 0) {
+          recordFailedLogin(username || "unknown");
+          return send(response, 401, { error: "Incorrect username or password." });
+        }
+      }
+      loginAttempts.delete(username || "unknown");
 
       return send(response, 200, {
         token: signToken(authUser),
@@ -488,86 +613,176 @@ const server = createServer(async (request, response) => {
     if (pointsHandled) return;
 
     if (path === "/api/users" && request.method === "GET") {
-      if (!["ADMIN", "GROUP_LEADER"].includes(user.role)) {
-        return send(response, 403, { error: "You do not have permission to view users." });
-      }
+      requireAnyRole(user, ["ADMIN"], "Only an Admin can view account administration.");
 
       const [rows] = await db.execute(
-        "SELECT id, full_name, username, role, unit, active, created_at FROM users ORDER BY created_at DESC"
+        "SELECT * FROM users ORDER BY created_at DESC"
       );
+      const managedUsers = await Promise.all(rows.map((account) => hydrateUserAccess(db, account)));
 
-      return send(response, 200, { users: rows.map(publicUser) });
+      return send(response, 200, { users: managedUsers.map(publicUser) });
     }
 
     if (path === "/api/users" && request.method === "POST") {
-      if (user.role !== "ADMIN") {
-        return send(response, 403, { error: "Only an Admin can create user accounts." });
-      }
+      requireAnyRole(user, ["ADMIN"], "Only an Admin can create user accounts.");
 
       const validation = validateAccount(await readJson(request));
       if (validation.error) return send(response, 400, { error: validation.error });
-
-      const [existingRows] = await db.execute(
-        "SELECT id FROM users WHERE username = ? OR email = ? LIMIT 1",
-        [validation.value.username, validation.value.email],
-      );
-
-      if (existingRows.length > 0) {
-        return send(response, 409, { error: "That username or email address is already in use." });
+      const connection = await db.getConnection();
+      let newUserId;
+      try {
+        await connection.beginTransaction();
+        const assignedUnits = await resolveAccountUnits(connection, validation.value);
+        await assertScoutLinkAvailable(connection, validation.value);
+        const [existingRows] = await connection.execute(
+          "SELECT id FROM users WHERE username = ? OR email = ? LIMIT 1 FOR UPDATE",
+          [validation.value.username, validation.value.email],
+        );
+        if (existingRows.length > 0) {
+          throw createHttpError(409, "That username or email address is already in use.");
+        }
+        const [result] = await connection.execute(
+          `INSERT INTO users
+            (full_name, username, email, password_hash, role, unit, scout_id, active, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+          [
+            validation.value.fullName,
+            validation.value.username,
+            validation.value.email,
+            hashPassword(validation.value.password),
+            validation.value.role,
+            assignedUnits[0]?.name || null,
+            validation.value.scoutId,
+            validation.value.active ? 1 : 0,
+          ],
+        );
+        newUserId = result.insertId;
+        await replaceUserUnits(connection, newUserId, assignedUnits);
+        await connection.commit();
+      } catch (error) {
+        await connection.rollback();
+        throw error;
+      } finally {
+        connection.release();
       }
+      const [createdRows] = await db.execute("SELECT * FROM users WHERE id = ? LIMIT 1", [newUserId]);
+      const newUser = await hydrateUserAccess(db, createdRows[0]);
+      return send(response, 201, { user: publicUser(newUser) });
+    }
 
-      const [result] = await db.execute(
-        `
-          INSERT INTO users
-            (full_name, username, email, password_hash, role, unit, active, created_at)
-          VALUES (?, ?, ?, ?, ?, ?, 1, NOW())
-        `,
-        [
+    const userMatch = path.match(/^\/api\/users\/(\d+)$/);
+    if (userMatch && request.method === "PUT") {
+      requireAnyRole(user, ["ADMIN"], "Only an Admin can edit user accounts.");
+      const userId = Number(userMatch[1]);
+      const validation = validateAccount(await readJson(request), false, true);
+      if (validation.error) return send(response, 400, { error: validation.error });
+      const connection = await db.getConnection();
+      try {
+        await connection.beginTransaction();
+        const [currentRows] = await connection.execute(
+          "SELECT * FROM users WHERE id = ? LIMIT 1 FOR UPDATE",
+          [userId],
+        );
+        const current = currentRows[0];
+        if (!current) throw createHttpError(404, "User account not found.");
+
+        if (current.role === "ADMIN" && (validation.value.role !== "ADMIN" || !validation.value.active)) {
+          const [adminRows] = await connection.execute(
+            "SELECT COUNT(*) AS total FROM users WHERE role = 'ADMIN' AND active = 1 AND id <> ?",
+            [userId],
+          );
+          if (Number(adminRows[0]?.total || 0) === 0) {
+            throw createHttpError(400, "ScoutOS must keep at least one active Admin account.");
+          }
+        }
+
+        const assignedUnits = await resolveAccountUnits(connection, validation.value);
+        await assertScoutLinkAvailable(connection, validation.value, userId);
+        const [duplicates] = await connection.execute(
+          "SELECT id FROM users WHERE (username = ? OR email = ?) AND id <> ? LIMIT 1 FOR UPDATE",
+          [validation.value.username, validation.value.email, userId],
+        );
+        if (duplicates.length > 0) {
+          throw createHttpError(409, "That username or email address is already in use.");
+        }
+
+        const values = [
           validation.value.fullName,
           validation.value.username,
           validation.value.email,
-          hashPassword(validation.value.password),
           validation.value.role,
-          validation.value.unit,
-        ],
-      );
-
-      const newUser = {
-        id: result.insertId,
-        fullName: validation.value.fullName,
-        username: validation.value.username,
-        role: validation.value.role,
-        unit: validation.value.unit,
-        active: true,
-        createdAt: new Date().toISOString(),
-      };
-
-      return send(response, 201, { user: publicUser(newUser) });
+          assignedUnits[0]?.name || null,
+          validation.value.scoutId,
+          validation.value.active ? 1 : 0,
+        ];
+        let passwordSql = "";
+        if (validation.value.password) {
+          passwordSql = ", password_hash = ?";
+          values.push(hashPassword(validation.value.password));
+        }
+        values.push(userId);
+        await connection.execute(
+          `UPDATE users SET full_name = ?, username = ?, email = ?, role = ?, unit = ?,
+             scout_id = ?, active = ?, session_version = session_version + 1${passwordSql}
+           WHERE id = ?`,
+          values,
+        );
+        await replaceUserUnits(connection, userId, assignedUnits);
+        await connection.commit();
+      } catch (error) {
+        await connection.rollback();
+        throw error;
+      } finally {
+        connection.release();
+      }
+      const [updatedRows] = await db.execute("SELECT * FROM users WHERE id = ? LIMIT 1", [userId]);
+      return send(response, 200, { user: publicUser(await hydrateUserAccess(db, updatedRows[0])) });
     }
+
+    if (userMatch && request.method === "DELETE") {
+      requireAnyRole(user, ["ADMIN"], "Only an Admin can deactivate user accounts.");
+      const userId = Number(userMatch[1]);
+      if (String(user.id) === String(userId)) {
+        return send(response, 400, { error: "You cannot deactivate your own signed-in account." });
+      }
+      const [accounts] = await db.execute("SELECT id, role, active FROM users WHERE id = ? LIMIT 1", [userId]);
+      const account = accounts[0];
+      if (!account) return send(response, 404, { error: "User account not found." });
+      if (account.role === "ADMIN" && Boolean(account.active)) {
+        const [adminRows] = await db.execute(
+          "SELECT COUNT(*) AS total FROM users WHERE role = 'ADMIN' AND active = 1 AND id <> ?",
+          [userId],
+        );
+        if (Number(adminRows[0]?.total || 0) === 0) {
+          return send(response, 400, { error: "ScoutOS must keep at least one active Admin account." });
+        }
+      }
+      await db.execute(
+        "UPDATE users SET active = 0, session_version = session_version + 1 WHERE id = ?",
+        [userId],
+      );
+      return sendNoContent(response);
+    }
+
     if (path === "/api/scouts" && request.method === "GET") {
-      const [rows] = await db.execute(
-        "SELECT * FROM scouts ORDER BY created_at DESC"
+      const scope = scoutListScope(user);
+      const [scouts] = await db.execute(
+        `SELECT * FROM scouts${scope.where} ORDER BY created_at DESC`,
+        scope.values,
       );
-
-      const scouts = rows.filter((scout) =>
-        canAccessScout(user, scout)
-      );
-
       return send(response, 200, { scouts });
     }
     if (path === "/api/scouts" && request.method === "POST") {
+      requireAnyRole(user, LEADER_ROLES, "Scout accounts cannot create Scout records.");
       const validation = validateScout(await readJson(request));
 
       if (validation.error) {
         return send(response, 400, { error: validation.error });
       }
 
-      if (
-        user.role === "UNIT_LEADER" &&
-        validation.value.unit !== user.unit
-      ) {
+      if (user.role === "UNIT_LEADER" && !userHasUnitAccess(user, validation.value.unit)) {
         return send(response, 403, {
-          error: "You can only add scouts to your assigned unit.",
+          error: "You can only add Scouts to one of your assigned units.",
         });
       }
 
@@ -615,13 +830,14 @@ const server = createServer(async (request, response) => {
         });
       }
 
-      if (!canAccessScout(user, scout)) {
-        return send(response, 403, {
-          error: "You cannot access this scout.",
-        });
+      assertScoutReadAccess(user, scout);
+
+      if (request.method === "GET") {
+        return send(response, 200, { scout });
       }
 
       if (request.method === "PUT") {
+        assertScoutManageAccess(user, scout);
         const payload = await readJson(request);
 
         // Preserve existing join_date if not provided or empty in payload
@@ -635,6 +851,10 @@ const server = createServer(async (request, response) => {
           return send(response, 400, {
             error: validation.error,
           });
+        }
+
+        if (user.role === "UNIT_LEADER" && !userHasUnitAccess(user, validation.value.unit)) {
+          return send(response, 403, { error: "You cannot move a Scout outside your assigned units." });
         }
 
         await db.execute(
@@ -672,9 +892,10 @@ const server = createServer(async (request, response) => {
       }
 
       if (request.method === "DELETE") {
+        assertScoutManageAccess(user, scout);
         await db.execute(
-          "DELETE FROM scouts WHERE id = ?",
-          [scoutId]
+          "UPDATE scouts SET status = 'Inactive', updated_at = NOW() WHERE id = ?",
+          [scoutId],
         );
 
         return sendNoContent(response);
@@ -682,8 +903,15 @@ const server = createServer(async (request, response) => {
     }
     return send(response, 404, { error: "Route not found." });
   } catch (error) {
-    console.error(error);
-    return send(response, 400, { error: error.message || "Request failed." });
+    console.error("Request failed:", { code: error?.code, status: error?.status });
+    const requestedStatus = Number(error?.status);
+    const status = error?.code === "ER_DUP_ENTRY"
+      ? 409
+      : Number.isInteger(requestedStatus) && requestedStatus >= 400 && requestedStatus <= 599
+        ? requestedStatus
+        : 400;
+    const message = status < 500 ? error.message : "ScoutOS could not complete the request.";
+    return send(response, status, { error: message || "Request failed." });
   }
 
 });

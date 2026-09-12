@@ -1,5 +1,11 @@
 import db from "../database/db.js";
 import { meetingTypeValues, statusValues } from "../database/attendanceMigration.js";
+import {
+  assignedUnitNames,
+  assertScoutReadAccess,
+  isGlobalLeader,
+  userHasUnitAccess,
+} from "./authorizationService.js";
 
 const meetingTypes = new Set(meetingTypeValues);
 const attendanceStatuses = new Set(statusValues);
@@ -158,7 +164,32 @@ function mapRecord(row) {
   };
 }
 
-async function getSessionRow(id) {
+function attendanceUnitScope(user, column, requestedUnit = "") {
+  const unit = String(requestedUnit || "").trim();
+  if (isGlobalLeader(user)) {
+    return unit ? { condition: `${column} = ?`, values: [unit] } : { condition: "1 = 1", values: [] };
+  }
+  if (user?.role !== "UNIT_LEADER") {
+    throw createHttpError(403, "Scout accounts cannot access attendance management.");
+  }
+  const accessibleUnits = assignedUnitNames(user);
+  if (unit) {
+    if (!userHasUnitAccess(user, unit)) {
+      throw createHttpError(403, "You cannot access attendance for that unit.");
+    }
+    return { condition: `${column} = ?`, values: [unit] };
+  }
+  if (accessibleUnits.length === 0) return { condition: "1 = 0", values: [] };
+  return {
+    condition: `${column} IN (${accessibleUnits.map(() => "?").join(", ")})`,
+    values: accessibleUnits,
+  };
+}
+
+async function getSessionRow(id, user = null, requestedUnit = "") {
+  const scope = user
+    ? attendanceUnitScope(user, "sc.unit", requestedUnit)
+    : { condition: "1 = 1", values: [] };
   const [rows] = await db.execute(
     `
       SELECT
@@ -177,25 +208,28 @@ async function getSessionRow(id) {
           SUM(status = 'absent') AS absent_count,
           SUM(status = 'late') AS late_count,
           SUM(status = 'excused') AS excused_count
-        FROM attendance_records
+        FROM attendance_records r
+        INNER JOIN scouts sc ON sc.id = r.scout_id
+        WHERE ${scope.condition}
         GROUP BY session_id
       ) a ON a.session_id = s.id
       WHERE s.id = ?
       LIMIT 1
     `,
-    [id],
+    [...scope.values, id],
   );
 
   return rows[0] || null;
 }
 
-async function assertSessionExists(sessionId) {
-  const session = await getSessionRow(sessionId);
+async function assertSessionExists(sessionId, user = null, requestedUnit = "") {
+  const session = await getSessionRow(sessionId, user, requestedUnit);
   if (!session) throw createHttpError(404, "Attendance session not found.");
   return session;
 }
 
-export async function listSessions() {
+export async function listSessions(user, filters = {}) {
+  const scope = attendanceUnitScope(user, "sc.unit", filters.unit);
   const [rows] = await db.execute(`
     SELECT
       s.*,
@@ -213,22 +247,25 @@ export async function listSessions() {
         SUM(status = 'absent') AS absent_count,
         SUM(status = 'late') AS late_count,
         SUM(status = 'excused') AS excused_count
-      FROM attendance_records
+      FROM attendance_records r
+      INNER JOIN scouts sc ON sc.id = r.scout_id
+      WHERE ${scope.condition}
       GROUP BY session_id
     ) a ON a.session_id = s.id
     ORDER BY s.meeting_date DESC, s.start_time DESC, s.created_at DESC
-  `);
+  `, scope.values);
 
   return rows.map(mapSession);
 }
 
-export async function getSession(id) {
+export async function getSession(id, user, filters = {}) {
   const sessionId = Number(id);
   if (!Number.isInteger(sessionId) || sessionId < 1) {
     throw createHttpError(400, "Invalid attendance session ID.");
   }
 
-  const sessionRow = await assertSessionExists(sessionId);
+  const scope = attendanceUnitScope(user, "sc.unit", filters.unit);
+  const sessionRow = await assertSessionExists(sessionId, user, filters.unit);
   const [recordRows] = await db.execute(
     `
       SELECT
@@ -244,10 +281,10 @@ export async function getSession(id) {
         sc.updated_at AS scout_updated_at
       FROM attendance_records r
       INNER JOIN scouts sc ON sc.id = r.scout_id
-      WHERE r.session_id = ?
+      WHERE r.session_id = ? AND ${scope.condition}
       ORDER BY sc.name ASC
     `,
-    [sessionId],
+    [sessionId, ...scope.values],
   );
 
   return {
@@ -282,13 +319,16 @@ export async function createSession(body, user) {
   return mapSession(sessionRow);
 }
 
-export async function updateSession(id, body) {
+export async function updateSession(id, body, user) {
   const sessionId = Number(id);
   if (!Number.isInteger(sessionId) || sessionId < 1) {
     throw createHttpError(400, "Invalid attendance session ID.");
   }
 
-  await assertSessionExists(sessionId);
+  const existing = await assertSessionExists(sessionId);
+  if (user.role === "UNIT_LEADER" && String(existing.created_by || "") !== String(user.id)) {
+    throw createHttpError(403, "Unit Leaders can only edit attendance sessions they created.");
+  }
   const input = normalizeSessionInput(body);
 
   await db.execute(
@@ -321,19 +361,33 @@ export async function updateSession(id, body) {
   return mapSession(sessionRow);
 }
 
-export async function deleteSession(id) {
+export async function deleteSession(id, user) {
   const sessionId = Number(id);
   if (!Number.isInteger(sessionId) || sessionId < 1) {
     throw createHttpError(400, "Invalid attendance session ID.");
   }
 
+  const existing = await assertSessionExists(sessionId);
+  if (user.role === "UNIT_LEADER") {
+    if (String(existing.created_by || "") !== String(user.id)) {
+      throw createHttpError(403, "Unit Leaders can only delete attendance sessions they created.");
+    }
+    const [units] = await db.execute(
+      `SELECT DISTINCT sc.unit FROM attendance_records record
+       INNER JOIN scouts sc ON sc.id = record.scout_id WHERE record.session_id = ?`,
+      [sessionId],
+    );
+    if (units.some((row) => !userHasUnitAccess(user, row.unit))) {
+      throw createHttpError(403, "This session contains records outside your assigned units.");
+    }
+  }
   const [result] = await db.execute("DELETE FROM attendance_sessions WHERE id = ?", [sessionId]);
   if (result.affectedRows === 0) {
     throw createHttpError(404, "Attendance session not found.");
   }
 }
 
-export async function saveAttendance(body) {
+export async function saveAttendance(body, user) {
   const sessionId = Number(body.sessionId);
   if (!Number.isInteger(sessionId) || sessionId < 1) {
     throw createHttpError(400, "A valid session ID is required.");
@@ -357,7 +411,7 @@ export async function saveAttendance(body) {
 
   const placeholders = records.map(() => "?").join(", ");
   const [scoutRows] = await db.execute(
-    `SELECT id FROM scouts WHERE id IN (${placeholders})`,
+    `SELECT id, unit FROM scouts WHERE id IN (${placeholders})`,
     records.map((record) => record.scoutId),
   );
   const validScoutIds = new Set(scoutRows.map((row) => row.id));
@@ -365,6 +419,12 @@ export async function saveAttendance(body) {
 
   if (missingScout) {
     throw createHttpError(400, `Scout ${missingScout.scoutId} does not exist.`);
+  }
+  if (user.role === "UNIT_LEADER") {
+    const unauthorizedScout = scoutRows.find((scout) => !userHasUnitAccess(user, scout.unit));
+    if (unauthorizedScout) {
+      throw createHttpError(403, "Attendance can only be saved for Scouts in your assigned units.");
+    }
   }
 
   const connection = await db.getConnection();
@@ -402,7 +462,7 @@ export async function saveAttendance(body) {
 
     await connection.commit();
 
-    const detail = await getSession(sessionId);
+    const detail = await getSession(sessionId, user);
     return {
       ...detail,
       updated: updatedExistingAttendance,
@@ -415,9 +475,12 @@ export async function saveAttendance(body) {
   }
 }
 
-export async function getScoutAttendanceSummary(scoutId) {
+export async function getScoutAttendanceSummary(scoutId, user) {
   const id = String(scoutId || "").trim();
   if (!id) throw createHttpError(400, "Scout ID is required.");
+  const [scouts] = await db.execute("SELECT id, unit FROM scouts WHERE id = ? LIMIT 1", [id]);
+  if (!scouts[0]) throw createHttpError(404, "Scout not found.");
+  assertScoutReadAccess(user, scouts[0]);
 
   const [records] = await db.execute(
     `

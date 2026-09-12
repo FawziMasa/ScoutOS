@@ -1,5 +1,6 @@
 import db from "../database/db.js";
 import { eventTypeValues } from "../database/eventMigration.js";
+import { userHasUnitAccess } from "./authorizationService.js";
 
 const eventTypes = new Set(eventTypeValues);
 
@@ -179,8 +180,8 @@ export async function replaceRegistrations(id, body, user) {
     const [scouts] = await db.execute(`SELECT id, unit, status FROM scouts WHERE id IN (${placeholders})`, scoutIds);
     if (scouts.length !== scoutIds.length) throw createHttpError(400, "One or more selected scouts no longer exist.");
     if (scouts.some((scout) => scout.status !== "Active")) throw createHttpError(400, "Only active scouts can be registered.");
-    if (user.role === "UNIT_LEADER" && scouts.some((scout) => scout.unit !== user.unit)) {
-      throw createHttpError(403, "You can only register scouts from your assigned unit.");
+    if (user.role === "UNIT_LEADER" && scouts.some((scout) => !userHasUnitAccess(user, scout.unit))) {
+      throw createHttpError(403, "You can only register Scouts from your assigned units.");
     }
   }
 

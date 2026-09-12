@@ -1,5 +1,11 @@
 import db from "../database/db.js";
 import { financeStatuses, financeTransactionTypes } from "../database/financeMigration.js";
+import {
+  assignedUnitNames,
+  isGlobalLeader,
+  isOperationalLeader,
+  userHasUnitAccess,
+} from "./authorizationService.js";
 
 const units = new Set(["أشبال و زهرات", "مبتدئ", "متقدم", "جوالة", "قيادة"]);
 const transactionTypes = new Set(financeTransactionTypes);
@@ -89,22 +95,19 @@ function requestedUnit(body, fallback = null) {
   return unit;
 }
 
-function isUnrestricted(user) {
-  // Existing ScoutOS semantics: a Group Leader manages the whole scout group.
-  return user.role === "ADMIN" || user.role === "GROUP_LEADER";
-}
-
 function assertScope(user) {
-  if (isUnrestricted(user)) return;
-  if (user.role !== "UNIT_LEADER" || !units.has(user.unit)) {
-    throw createHttpError(403, "Your account does not have an assigned finance unit.");
+  if (!isOperationalLeader(user)) {
+    throw createHttpError(403, "Scout accounts cannot access Finance.");
+  }
+  if (user.role === "UNIT_LEADER" && assignedUnitNames(user).length === 0) {
+    throw createHttpError(403, "Your account does not have an assigned Finance unit.");
   }
 }
 
 function assertCanAccessUnit(user, unit) {
   assertScope(user);
-  if (!isUnrestricted(user) && unit !== user.unit) {
-    throw createHttpError(403, "You can only access transactions for your assigned unit.");
+  if (!isGlobalLeader(user) && !userHasUnitAccess(user, unit)) {
+    throw createHttpError(403, "You can only access transactions for your assigned units.");
   }
 }
 
@@ -112,11 +115,14 @@ function resolveWriteUnit(user, body, existingUnit = null) {
   assertScope(user);
   const suppliedUnit = requestedUnit(body, existingUnit);
 
-  if (!isUnrestricted(user)) {
-    if (suppliedUnit && suppliedUnit !== user.unit) {
-      throw createHttpError(403, "You cannot create or move a transaction outside your assigned unit.");
+  if (!isGlobalLeader(user)) {
+    const accessibleUnits = assignedUnitNames(user);
+    if (suppliedUnit && !userHasUnitAccess(user, suppliedUnit)) {
+      throw createHttpError(403, "You cannot create or move a transaction outside your assigned units.");
     }
-    return user.unit;
+    if (suppliedUnit) return suppliedUnit;
+    if (accessibleUnits.length === 1) return accessibleUnits[0];
+    throw createHttpError(400, "Select one of your assigned units for this transaction.");
   }
 
   if (!suppliedUnit) throw createHttpError(400, "Unit is required.");
@@ -184,10 +190,21 @@ function appendFilters(user, filters) {
   const values = [];
   const unit = requestedUnit(filters, null);
 
-  if (!isUnrestricted(user)) {
-    if (unit && unit !== user.unit) throw createHttpError(403, "You can only filter your assigned unit.");
-    conditions.push("t.unit = ?");
-    values.push(user.unit);
+  if (!isGlobalLeader(user)) {
+    const accessibleUnits = assignedUnitNames(user);
+    if (unit && !userHasUnitAccess(user, unit)) {
+      throw createHttpError(403, "You can only filter your assigned units.");
+    }
+    if (unit) {
+      conditions.push("t.unit = ?");
+      values.push(unit);
+    } else if (accessibleUnits.length === 1) {
+      conditions.push("t.unit = ?");
+      values.push(accessibleUnits[0]);
+    } else {
+      conditions.push(`t.unit IN (${accessibleUnits.map(() => "?").join(", ")})`);
+      values.push(...accessibleUnits);
+    }
   } else if (unit) {
     conditions.push("t.unit = ?");
     values.push(unit);

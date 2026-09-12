@@ -29,15 +29,15 @@ export async function addPointsController(request, response, context) {
     const scoutId = body.scoutId || body.scout_id;
     const pointsChange = body.pointsChange ?? body.points_change;
     const reason = body.reason;
-    const leaderId = context.user.id;
+    const requestId = body.requestId || body.request_id || null;
 
-    if (!scoutId || typeof pointsChange !== 'number' || !reason) {
+    if (!scoutId || typeof pointsChange !== "number" || !reason) {
       context.send(response, 400, { error: "Missing required fields (scoutId/scout_id, pointsChange/points_change, reason)." });
       return;
     }
 
-    await addPoints(scoutId, pointsChange, reason, leaderId);
-    context.send(response, 200, { message: "Points added successfully." });
+    const transaction = await addPoints(scoutId, pointsChange, reason, context.user, requestId);
+    context.send(response, 201, { transaction });
   });
 }
 
@@ -50,7 +50,7 @@ export async function getLeaderboardController(_request, response, context) {
 
 export async function getScoutPointsController(_request, response, context, scoutId) {
   await run(response, context.send, async () => {
-    const history = await getScoutPointsHistory(scoutId);
-    context.send(response, 200, { history });
+    const transactions = await getScoutPointsHistory(scoutId, context.user);
+    context.send(response, 200, { transactions });
   });
 }

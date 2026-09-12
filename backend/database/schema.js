@@ -1,4 +1,5 @@
 import db from "./db.js";
+import { ensureAccessSchema } from "./accessMigration.js";
 import { ensureAttendanceSchema } from "./attendanceMigration.js";
 import { ensureEventSchema } from "./eventMigration.js";
 import { ensureFinanceSchema } from "./financeMigration.js";
@@ -63,6 +64,7 @@ async function ensureUsersTable() {
       password_hash VARCHAR(255) NOT NULL,
       role VARCHAR(20) NOT NULL DEFAULT 'UNIT_LEADER',
       unit VARCHAR(50) NULL,
+      scout_id VARCHAR(36) NULL,
       active TINYINT(1) NOT NULL DEFAULT 1,
       session_version INT NOT NULL DEFAULT 0,
       created_at DATETIME NULL,
@@ -145,6 +147,8 @@ export async function ensureCoreSchema() {
   } else {
     await ensureScoutsTable();
   }
+
+  await ensureAccessSchema();
 
   await ensureAttendanceSchema();
   await ensureEventSchema();

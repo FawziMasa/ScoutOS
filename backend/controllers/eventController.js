@@ -6,6 +6,7 @@ import {
   replaceRegistrations,
   updateEvent,
 } from "../services/eventService.js";
+import { LEADER_ROLES, requireAnyRole } from "../services/authorizationService.js";
 
 function errorStatus(error) {
   return Number.isInteger(Number(error.status)) ? Number(error.status) : 500;
@@ -29,20 +30,30 @@ export async function getEventRecord(_request, response, context, id) {
 }
 
 export async function createEventRecord(request, response, context) {
-  await run(response, context.send, async () => context.send(response, 201, { event: await createEvent(await context.readJson(request), context.user) }));
+  await run(response, context.send, async () => {
+    requireAnyRole(context.user, LEADER_ROLES, "Scout accounts cannot create events.");
+    context.send(response, 201, { event: await createEvent(await context.readJson(request), context.user) });
+  });
 }
 
 export async function updateEventRecord(request, response, context, id) {
-  await run(response, context.send, async () => context.send(response, 200, { event: await updateEvent(id, await context.readJson(request)) }));
+  await run(response, context.send, async () => {
+    requireAnyRole(context.user, LEADER_ROLES, "Scout accounts cannot edit events.");
+    context.send(response, 200, { event: await updateEvent(id, await context.readJson(request)) });
+  });
 }
 
 export async function deleteEventRecord(_request, response, context, id) {
   await run(response, context.send, async () => {
+    requireAnyRole(context.user, LEADER_ROLES, "Scout accounts cannot delete events.");
     await deleteEvent(id);
     context.sendNoContent(response);
   });
 }
 
 export async function replaceEventRegistrations(request, response, context, id) {
-  await run(response, context.send, async () => context.send(response, 200, await replaceRegistrations(id, await context.readJson(request), context.user)));
+  await run(response, context.send, async () => {
+    requireAnyRole(context.user, LEADER_ROLES, "Scout accounts cannot manage event registrations.");
+    context.send(response, 200, await replaceRegistrations(id, await context.readJson(request), context.user));
+  });
 }

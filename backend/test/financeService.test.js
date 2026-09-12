@@ -76,6 +76,32 @@ test("finance queries permanently scope Unit Leaders to their assigned unit", as
   }
 });
 
+test("finance queries support all assigned units for a multi-unit leader", async () => {
+  const originalExecute = db.execute;
+  const calls = [];
+  db.execute = async (sql, values) => {
+    calls.push({ sql, values });
+    return [[]];
+  };
+  const multiUnitLeader = {
+    ...unitLeader,
+    assignedUnits: [
+      { id: 1, name: "أشبال و زهرات" },
+      { id: 2, name: "مبتدئ" },
+    ],
+  };
+  try {
+    await listTransactions(multiUnitLeader);
+    assert.match(calls[0].sql, /WHERE t\.unit IN \(\?, \?\)/);
+    assert.deepEqual(calls[0].values, ["أشبال و زهرات", "مبتدئ"]);
+    await listTransactions(multiUnitLeader, { unit: "مبتدئ" });
+    assert.match(calls[1].sql, /WHERE t\.unit = \?/);
+    assert.deepEqual(calls[1].values, ["مبتدئ"]);
+  } finally {
+    db.execute = originalExecute;
+  }
+});
+
 test("a Unit Leader cannot forge another unit on transaction creation", async () => {
   const originalExecute = db.execute;
   db.execute = async () => {
