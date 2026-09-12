@@ -14,6 +14,10 @@ Date: 2026-09-12
 - Phase 2 is implemented: Admin-only Scout invitations, 24-hour hashed tokens,
   self-service password setup, resend/revoke/expiry/failure states, and focused
   authorization and token tests.
+- Phase 3A Finance integrity is implemented: draft/submission/approval/rejection
+  states, append-only history, cancellation instead of deletion, approved
+  reversals, approval evidence, and scope-safe CSV export. Receipt files remain
+  the next Finance slice.
 
 ## Executive verdict
 

@@ -66,11 +66,9 @@ function normalizeAmount(value) {
 
 function normalizeTransactionInput(body) {
   const transactionType = String(body?.transactionType || "").trim().toUpperCase();
-  const status = String(body?.status || "").trim().toUpperCase();
   const paymentMethod = String(body?.paymentMethod || "").trim();
 
   if (!transactionTypes.has(transactionType)) throw createHttpError(400, "Transaction type is invalid.");
-  if (!statuses.has(status)) throw createHttpError(400, "Transaction status is invalid.");
   if (!paymentMethods.has(paymentMethod)) throw createHttpError(400, "Payment method is invalid.");
 
   return {
@@ -80,11 +78,14 @@ function normalizeTransactionInput(body) {
     vendorPaidTo: trimOptional(body?.vendorPaidTo, "Vendor / paid to", 150),
     amount: normalizeAmount(body?.amount),
     paymentMethod,
-    status,
     transactionDate: normalizeDate(body?.transactionDate, "Transaction date"),
     referenceNumber: trimOptional(body?.referenceNumber, "Reference number", 80),
     notes: trimOptional(body?.notes, "Notes", 4000),
   };
+}
+
+function normalizeReason(value, fieldName = "Reason") {
+  return trimRequired(value, fieldName, 500);
 }
 
 function requestedUnit(body, fallback = null) {
@@ -157,6 +158,11 @@ function mapTransaction(row) {
     createdAt: row.created_at,
     updatedBy: mapActor(row, "updated"),
     updatedAt: row.updated_at,
+    approvedBy: mapActor(row, "approved"),
+    approvedAt: row.approved_at,
+    rejectionReason: row.rejection_reason || "",
+    reversalOfId: row.reversal_of_id === null || row.reversal_of_id === undefined ? null : Number(row.reversal_of_id),
+    reversingTransactionId: row.reversing_transaction_id === null || row.reversing_transaction_id === undefined ? null : Number(row.reversing_transaction_id),
   };
 }
 
@@ -165,20 +171,29 @@ const transactionSelect = `
     created_user.full_name AS created_by_name,
     created_user.username AS created_by_username,
     updated_user.full_name AS updated_by_name,
-    updated_user.username AS updated_by_username
+    updated_user.username AS updated_by_username,
+    approved_user.full_name AS approved_by_name,
+    approved_user.username AS approved_by_username,
+    (SELECT reversal.id FROM finance_transactions reversal
+      WHERE reversal.reversal_of_id = t.id AND reversal.status = 'APPROVED'
+      ORDER BY reversal.id DESC LIMIT 1) AS reversing_transaction_id
   FROM finance_transactions t
   LEFT JOIN users created_user ON created_user.id = t.created_by
   LEFT JOIN users updated_user ON updated_user.id = t.updated_by
+  LEFT JOIN users approved_user ON approved_user.id = t.approved_by
 `;
 
-async function getTransactionRow(id) {
-  const [rows] = await db.execute(`${transactionSelect} WHERE t.id = ? LIMIT 1`, [id]);
+async function getTransactionRow(id, database = db, lock = false) {
+  const [rows] = await database.execute(
+    `${transactionSelect} WHERE t.id = ? LIMIT 1${lock ? " FOR UPDATE" : ""}`,
+    [id],
+  );
   return rows[0] || null;
 }
 
-async function getAuthorizedTransaction(id, user) {
+async function getAuthorizedTransaction(id, user, database = db, lock = false) {
   const transactionId = normalizeId(id);
-  const row = await getTransactionRow(transactionId);
+  const row = await getTransactionRow(transactionId, database, lock);
   if (!row) throw createHttpError(404, "Transaction not found.");
   assertCanAccessUnit(user, row.unit);
   return row;
@@ -258,43 +273,235 @@ export async function getTransaction(id, user) {
   return mapTransaction(await getAuthorizedTransaction(id, user));
 }
 
+async function withTransaction(action) {
+  const connection = await db.getConnection();
+  try {
+    await connection.beginTransaction();
+    const result = await action(connection);
+    await connection.commit();
+    return result;
+  } catch (error) {
+    await connection.rollback();
+    throw error;
+  } finally {
+    connection.release();
+  }
+}
+
+async function recordStatusHistory(connection, transactionId, fromStatus, toStatus, reason, userId) {
+  await connection.execute(
+    `INSERT INTO finance_status_history
+      (transaction_id, from_status, to_status, reason, changed_by, created_at)
+     VALUES (?, ?, ?, ?, ?, NOW())`,
+    [transactionId, fromStatus, toStatus, reason || null, Number(userId)],
+  );
+}
+
 export async function createTransaction(body, user) {
   const input = normalizeTransactionInput(body);
   const unit = resolveWriteUnit(user, body);
-  const [result] = await db.execute(`
-    INSERT INTO finance_transactions
-      (unit, transaction_type, category, description, vendor_paid_to, amount, payment_method, status, transaction_date, reference_number, notes, created_by, created_at, updated_by, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), ?, NOW())
-  `, [unit, input.transactionType, input.category, input.description, input.vendorPaidTo, input.amount, input.paymentMethod, input.status, input.transactionDate, input.referenceNumber, input.notes, Number(user.id), Number(user.id)]);
-  return mapTransaction(await getTransactionRow(result.insertId));
+  const transactionId = await withTransaction(async (connection) => {
+    const [result] = await connection.execute(`
+      INSERT INTO finance_transactions
+        (unit, transaction_type, category, description, vendor_paid_to, amount, payment_method, status, transaction_date, reference_number, notes, created_by, created_at, updated_by, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'DRAFT', ?, ?, ?, ?, NOW(), ?, NOW())
+    `, [unit, input.transactionType, input.category, input.description, input.vendorPaidTo, input.amount, input.paymentMethod, input.transactionDate, input.referenceNumber, input.notes, Number(user.id), Number(user.id)]);
+    await recordStatusHistory(connection, result.insertId, null, "DRAFT", "Transaction created", user.id);
+    return result.insertId;
+  });
+  return mapTransaction(await getTransactionRow(transactionId));
 }
 
 export async function updateTransaction(id, body, user) {
-  const existing = await getAuthorizedTransaction(id, user);
   const input = normalizeTransactionInput(body);
-  const unit = resolveWriteUnit(user, body, existing.unit);
-
-  await db.execute(`
-    UPDATE finance_transactions
-    SET unit = ?, transaction_type = ?, category = ?, description = ?, vendor_paid_to = ?, amount = ?, payment_method = ?, status = ?, transaction_date = ?, reference_number = ?, notes = ?, updated_by = ?, updated_at = NOW()
-    WHERE id = ?
-  `, [unit, input.transactionType, input.category, input.description, input.vendorPaidTo, input.amount, input.paymentMethod, input.status, input.transactionDate, input.referenceNumber, input.notes, Number(user.id), existing.id]);
-  return mapTransaction(await getTransactionRow(existing.id));
+  const transactionId = await withTransaction(async (connection) => {
+    const existing = await getAuthorizedTransaction(id, user, connection, true);
+    if (!["DRAFT", "REJECTED"].includes(existing.status)) {
+      throw createHttpError(409, "Only draft or rejected transactions can be edited.");
+    }
+    const unit = resolveWriteUnit(user, body, existing.unit);
+    const nextStatus = existing.status === "REJECTED" ? "DRAFT" : existing.status;
+    await connection.execute(`
+      UPDATE finance_transactions
+      SET unit = ?, transaction_type = ?, category = ?, description = ?, vendor_paid_to = ?,
+          amount = ?, payment_method = ?, status = ?, transaction_date = ?, reference_number = ?,
+          notes = ?, rejection_reason = NULL, updated_by = ?, updated_at = NOW()
+      WHERE id = ?
+    `, [unit, input.transactionType, input.category, input.description, input.vendorPaidTo, input.amount, input.paymentMethod, nextStatus, input.transactionDate, input.referenceNumber, input.notes, Number(user.id), existing.id]);
+    if (existing.status !== nextStatus) {
+      await recordStatusHistory(connection, existing.id, existing.status, nextStatus, "Edited after rejection", user.id);
+    }
+    return existing.id;
+  });
+  return mapTransaction(await getTransactionRow(transactionId));
 }
 
-export async function deleteTransaction(id, user) {
+async function transitionTransaction(id, user, { allowed, toStatus, reason = null, adminOnly = false }) {
+  if (adminOnly && user.role !== "ADMIN") {
+    throw createHttpError(403, "Only an Admin can approve or reject financial transactions.");
+  }
+  const transactionId = await withTransaction(async (connection) => {
+    const existing = await getAuthorizedTransaction(id, user, connection, true);
+    if (!allowed.includes(existing.status)) {
+      throw createHttpError(409, `A ${existing.status.toLowerCase()} transaction cannot move to ${toStatus.toLowerCase()}.`);
+    }
+    const approvalSql = toStatus === "APPROVED"
+      ? ", approved_by = ?, approved_at = NOW(), rejection_reason = NULL"
+      : toStatus === "REJECTED"
+        ? ", approved_by = NULL, approved_at = NULL, rejection_reason = ?"
+        : "";
+    const values = [toStatus, Number(user.id)];
+    if (toStatus === "APPROVED") values.push(Number(user.id));
+    if (toStatus === "REJECTED") values.push(reason);
+    values.push(existing.id);
+    await connection.execute(
+      `UPDATE finance_transactions SET status = ?, updated_by = ?, updated_at = NOW()${approvalSql} WHERE id = ?`,
+      values,
+    );
+    await recordStatusHistory(connection, existing.id, existing.status, toStatus, reason, user.id);
+    return existing.id;
+  });
+  return mapTransaction(await getTransactionRow(transactionId));
+}
+
+export function submitTransaction(id, user) {
+  return transitionTransaction(id, user, {
+    allowed: ["DRAFT", "REJECTED"],
+    toStatus: "SUBMITTED",
+    reason: "Submitted for approval",
+  });
+}
+
+export function approveTransaction(id, user) {
+  return transitionTransaction(id, user, {
+    allowed: ["SUBMITTED"],
+    toStatus: "APPROVED",
+    reason: "Approved",
+    adminOnly: true,
+  });
+}
+
+export function rejectTransaction(id, reason, user) {
+  return transitionTransaction(id, user, {
+    allowed: ["SUBMITTED"],
+    toStatus: "REJECTED",
+    reason: normalizeReason(reason, "Rejection reason"),
+    adminOnly: true,
+  });
+}
+
+export function cancelTransaction(id, reason, user) {
+  return transitionTransaction(id, user, {
+    allowed: ["DRAFT", "SUBMITTED", "REJECTED"],
+    toStatus: "CANCELLED",
+    reason: normalizeReason(reason || "Cancelled by an authorized user", "Cancellation reason"),
+  });
+}
+
+export async function reverseTransaction(id, reason, user) {
+  if (user.role !== "ADMIN") throw createHttpError(403, "Only an Admin can reverse an approved transaction.");
+  const reversalReason = normalizeReason(reason, "Reversal reason");
+  const reversalId = await withTransaction(async (connection) => {
+    const existing = await getAuthorizedTransaction(id, user, connection, true);
+    if (existing.status !== "APPROVED") throw createHttpError(409, "Only an approved transaction can be reversed.");
+    if (existing.reversal_of_id) throw createHttpError(409, "A reversal entry cannot be reversed.");
+    if (existing.reversing_transaction_id) throw createHttpError(409, "This transaction already has an approved reversal.");
+    const reverseType = existing.transaction_type === "INCOME" ? "EXPENSE" : "INCOME";
+    const [result] = await connection.execute(`
+      INSERT INTO finance_transactions
+        (unit, transaction_type, category, description, vendor_paid_to, amount, payment_method,
+         status, transaction_date, reference_number, notes, created_by, created_at, updated_by,
+         updated_at, approved_by, approved_at, reversal_of_id)
+      VALUES (?, ?, ?, ?, ?, ?, ?, 'APPROVED', CURDATE(), ?, ?, ?, NOW(), ?, NOW(), ?, NOW(), ?)
+    `, [
+      existing.unit,
+      reverseType,
+      existing.category,
+      `Reversal: ${existing.description}`.slice(0, 255),
+      existing.vendor_paid_to,
+      existing.amount,
+      existing.payment_method,
+      `REV-${existing.id}`,
+      `Reversal reason: ${reversalReason}`,
+      Number(user.id),
+      Number(user.id),
+      Number(user.id),
+      existing.id,
+    ]);
+    await recordStatusHistory(
+      connection,
+      result.insertId,
+      null,
+      "APPROVED",
+      `Reversal of transaction #${existing.id}: ${reversalReason}`,
+      user.id,
+    );
+    return result.insertId;
+  });
+  return mapTransaction(await getTransactionRow(reversalId));
+}
+
+export async function listTransactionHistory(id, user) {
   const existing = await getAuthorizedTransaction(id, user);
-  await db.execute("DELETE FROM finance_transactions WHERE id = ?", [existing.id]);
+  const [rows] = await db.execute(
+    `SELECT history.*, actor.full_name AS changed_by_name, actor.username AS changed_by_username
+     FROM finance_status_history history
+     LEFT JOIN users actor ON actor.id = history.changed_by
+     WHERE history.transaction_id = ?
+     ORDER BY history.created_at ASC, history.id ASC`,
+    [existing.id],
+  );
+  return rows.map((row) => ({
+    id: Number(row.id),
+    fromStatus: row.from_status || null,
+    toStatus: row.to_status,
+    reason: row.reason || "",
+    changedBy: row.changed_by ? {
+      id: String(row.changed_by),
+      fullName: row.changed_by_name || row.changed_by_username || "Former ScoutOS user",
+      username: row.changed_by_username || "",
+    } : null,
+    createdAt: row.created_at,
+  }));
+}
+
+function csvCell(value) {
+  const text = String(value ?? "");
+  const safe = /^[=+\-@]/.test(text) ? `'${text}` : text;
+  return `"${safe.replaceAll('"', '""')}"`;
+}
+
+export async function exportTransactionsCsv(user, filters = {}) {
+  const transactions = await listTransactions(user, filters);
+  const headings = ["ID", "Date", "Unit", "Type", "Status", "Category", "Description", "Vendor / paid to", "Amount JOD", "Payment method", "Reference", "Created by", "Approved by", "Approved at", "Reversal of"];
+  const rows = transactions.map((transaction) => [
+    transaction.id,
+    transaction.transactionDate,
+    transaction.unit,
+    transaction.transactionType,
+    transaction.status,
+    transaction.category,
+    transaction.description,
+    transaction.vendorPaidTo,
+    transaction.amount.toFixed(2),
+    transaction.paymentMethod,
+    transaction.referenceNumber,
+    transaction.createdBy?.fullName || "",
+    transaction.approvedBy?.fullName || "",
+    transaction.approvedAt || "",
+    transaction.reversalOfId || "",
+  ]);
+  return `\uFEFF${[headings, ...rows].map((row) => row.map(csvCell).join(",")).join("\r\n")}\r\n`;
 }
 
 export async function getFinanceSummary(user, filters = {}) {
   const { where, values } = appendFilters(user, filters);
   const [rows] = await db.execute(`
     SELECT
-      COALESCE(SUM(CASE WHEN t.transaction_type = 'INCOME' AND t.status <> 'CANCELLED' THEN t.amount ELSE 0 END), 0) AS total_income,
-      COALESCE(SUM(CASE WHEN t.transaction_type = 'EXPENSE' AND t.status <> 'CANCELLED' THEN t.amount ELSE 0 END), 0) AS total_expenses,
-      COALESCE(SUM(CASE WHEN t.transaction_type = 'EXPENSE' AND t.status <> 'CANCELLED' AND t.transaction_date >= DATE_FORMAT(CURDATE(), '%Y-%m-01') AND t.transaction_date <= CURDATE() THEN t.amount ELSE 0 END), 0) AS this_month,
-      COALESCE(SUM(CASE WHEN t.status = 'PENDING' THEN 1 ELSE 0 END), 0) AS pending,
+      COALESCE(SUM(CASE WHEN t.transaction_type = 'INCOME' AND t.status = 'APPROVED' THEN t.amount ELSE 0 END), 0) AS total_income,
+      COALESCE(SUM(CASE WHEN t.transaction_type = 'EXPENSE' AND t.status = 'APPROVED' THEN t.amount ELSE 0 END), 0) AS total_expenses,
+      COALESCE(SUM(CASE WHEN t.transaction_type = 'EXPENSE' AND t.status = 'APPROVED' AND t.transaction_date >= DATE_FORMAT(CURDATE(), '%Y-%m-01') AND t.transaction_date <= CURDATE() THEN t.amount ELSE 0 END), 0) AS this_month,
+      COALESCE(SUM(CASE WHEN t.status = 'SUBMITTED' THEN 1 ELSE 0 END), 0) AS pending,
       COUNT(*) AS transactions
     FROM finance_transactions t${where}
   `, values);

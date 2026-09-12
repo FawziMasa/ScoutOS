@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS finance_transactions (
   vendor_paid_to VARCHAR(150) NULL,
   amount DECIMAL(12, 2) NOT NULL,
   payment_method VARCHAR(50) NOT NULL,
-  status ENUM('COMPLETED', 'PENDING', 'CANCELLED') NOT NULL DEFAULT 'COMPLETED',
+  status ENUM('DRAFT', 'SUBMITTED', 'APPROVED', 'REJECTED', 'CANCELLED') NOT NULL DEFAULT 'DRAFT',
   transaction_date DATE NOT NULL,
   reference_number VARCHAR(80) NULL,
   notes TEXT NULL,
@@ -16,12 +16,35 @@ CREATE TABLE IF NOT EXISTS finance_transactions (
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_by INT NULL,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  approved_by INT NULL,
+  approved_at DATETIME NULL,
+  rejection_reason VARCHAR(500) NULL,
+  reversal_of_id INT NULL,
   PRIMARY KEY (id),
   INDEX idx_finance_transactions_unit_date (unit, transaction_date),
   INDEX idx_finance_transactions_status (status),
   INDEX idx_finance_transactions_category (category),
   INDEX idx_finance_transactions_created_by (created_by),
   INDEX idx_finance_transactions_updated_by (updated_by),
+  INDEX idx_finance_transactions_approved_by (approved_by),
+  UNIQUE KEY uq_finance_transactions_reversal (reversal_of_id),
   CONSTRAINT fk_finance_transactions_created_by FOREIGN KEY (created_by) REFERENCES users(id) ON DELETE SET NULL,
-  CONSTRAINT fk_finance_transactions_updated_by FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL
+  CONSTRAINT fk_finance_transactions_updated_by FOREIGN KEY (updated_by) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT fk_finance_transactions_approved_by FOREIGN KEY (approved_by) REFERENCES users(id) ON DELETE SET NULL,
+  CONSTRAINT fk_finance_transactions_reversal FOREIGN KEY (reversal_of_id) REFERENCES finance_transactions(id) ON DELETE RESTRICT
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS finance_status_history (
+  id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  transaction_id INT NOT NULL,
+  from_status VARCHAR(20) NULL,
+  to_status VARCHAR(20) NOT NULL,
+  reason VARCHAR(500) NULL,
+  changed_by INT NULL,
+  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id),
+  INDEX idx_finance_history_transaction (transaction_id, created_at),
+  INDEX idx_finance_history_actor (changed_by),
+  CONSTRAINT fk_finance_history_transaction FOREIGN KEY (transaction_id) REFERENCES finance_transactions(id) ON DELETE RESTRICT,
+  CONSTRAINT fk_finance_history_actor FOREIGN KEY (changed_by) REFERENCES users(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

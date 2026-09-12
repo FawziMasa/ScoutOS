@@ -10,6 +10,7 @@ import {
   scoutUnits as configuredScoutUnits,
   type FinanceFilters,
   type FinanceStatus,
+  type FinanceStatusHistory,
   type FinanceSummary,
   type FinanceTransaction,
   type FinanceTransactionInput,
@@ -36,7 +37,6 @@ function createEmptyTransaction(unit: ScoutUnit): FinanceTransactionInput {
     vendorPaidTo: "",
     amount: 0,
     paymentMethod: "Cash",
-    status: "COMPLETED",
     transactionDate: today(),
     referenceNumber: "",
     notes: "",
@@ -52,7 +52,6 @@ function inputFromTransaction(transaction: FinanceTransaction): FinanceTransacti
     vendorPaidTo: transaction.vendorPaidTo,
     amount: transaction.amount,
     paymentMethod: transaction.paymentMethod,
-    status: transaction.status,
     transactionDate: transaction.transactionDate,
     referenceNumber: transaction.referenceNumber,
     notes: transaction.notes,
@@ -83,7 +82,7 @@ function Finance() {
     : [...configuredScoutUnits];
   const scoutUnits = assignedUnits;
   const unitLocked = unitLeader && assignedUnits.length === 1;
-  const auditVisible = user?.role === "ADMIN";
+  const canApprove = user?.role === "ADMIN";
   const defaultUnit = assignedUnits[0] || configuredScoutUnits[0];
   const [filters, setFilters] = useState<FinanceFilters>({});
   const [transactions, setTransactions] = useState<FinanceTransaction[]>([]);
@@ -96,7 +95,10 @@ function Finance() {
   const [refreshing, setRefreshing] = useState(false);
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [saving, setSaving] = useState(false);
+  const [actionBusyId, setActionBusyId] = useState<number | null>(null);
+  const [history, setHistory] = useState<FinanceStatusHistory[]>([]);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
 
   const availableCategories = useMemo(() => [...new Set([...categories, ...transactions.map((transaction) => transaction.category)])].sort(), [transactions]);
 
@@ -141,7 +143,9 @@ function Finance() {
     setEditing(null);
     setReadOnly(false);
     setForm(createEmptyTransaction(defaultUnit));
+    setHistory([]);
     setError("");
+    setNotice("");
     setModalOpen(true);
   };
 
@@ -149,8 +153,12 @@ function Finance() {
     setEditing(transaction);
     setReadOnly(viewOnly);
     setForm(inputFromTransaction(transaction));
+    setHistory([]);
     setError("");
     setModalOpen(true);
+    void api.finance.history(transaction.id)
+      .then((result) => setHistory(result.history))
+      .catch((historyError) => setError(historyError instanceof Error ? historyError.message : "Could not load transaction history."));
   };
 
   const closeModal = () => {
@@ -163,6 +171,7 @@ function Finance() {
     try {
       setSaving(true);
       setError("");
+      setNotice("");
       const result = editing
         ? await api.finance.update(editing.id, form)
         : await api.finance.create(form);
@@ -171,6 +180,7 @@ function Finance() {
         : [result.transaction, ...current]);
       setModalOpen(false);
       await load(filters);
+      setNotice(editing ? "Draft transaction updated." : "Draft transaction created. Submit it when it is ready for approval.");
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Could not save this transaction.");
     } finally {
@@ -178,15 +188,66 @@ function Finance() {
     }
   };
 
-  const removeTransaction = async (transaction: FinanceTransaction) => {
-    if (!window.confirm(`Delete the ${formatMoney(transaction.amount)} ${titleCase(transaction.transactionType).toLowerCase()} for “${transaction.description}”? This cannot be undone.`)) return;
+  const runAction = async (
+    transaction: FinanceTransaction,
+    action: () => Promise<{ transaction: FinanceTransaction }>,
+    message: string,
+  ) => {
+    try {
+      setActionBusyId(transaction.id);
+      setError("");
+      setNotice("");
+      await action();
+      await load(filters);
+      setNotice(message);
+    } catch (actionError) {
+      setError(actionError instanceof Error ? actionError.message : "Could not update this transaction.");
+    } finally {
+      setActionBusyId(null);
+    }
+  };
+
+  const submitForApproval = (transaction: FinanceTransaction) => runAction(
+    transaction,
+    () => api.finance.submit(transaction.id),
+    "Transaction submitted for Admin approval.",
+  );
+
+  const approve = (transaction: FinanceTransaction) => {
+    if (!window.confirm(`Approve ${formatMoney(transaction.amount)} for “${transaction.description}”?`)) return;
+    void runAction(transaction, () => api.finance.approve(transaction.id), "Transaction approved and included in the balance.");
+  };
+
+  const reject = (transaction: FinanceTransaction) => {
+    const reason = window.prompt("Why is this transaction being rejected?");
+    if (reason === null) return;
+    void runAction(transaction, () => api.finance.reject(transaction.id, reason), "Transaction returned for correction.");
+  };
+
+  const cancel = (transaction: FinanceTransaction) => {
+    const reason = window.prompt("Why is this unapproved transaction being cancelled?");
+    if (reason === null) return;
+    void runAction(transaction, () => api.finance.cancel(transaction.id, reason), "Transaction cancelled. Its history was preserved.");
+  };
+
+  const reverse = (transaction: FinanceTransaction) => {
+    const reason = window.prompt("Why must this approved transaction be reversed?");
+    if (reason === null) return;
+    void runAction(transaction, () => api.finance.reverse(transaction.id, reason), "Approved reversal created. The original record remains unchanged.");
+  };
+
+  const exportCsv = async () => {
     try {
       setError("");
-      await api.finance.remove(transaction.id);
-      setTransactions((current) => current.filter((item) => item.id !== transaction.id));
-      await load(filters);
-    } catch (removeError) {
-      setError(removeError instanceof Error ? removeError.message : "Could not delete this transaction.");
+      const blob = await api.finance.exportCsv(filters);
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `scoutos-finance-${today()}.csv`;
+      link.click();
+      URL.revokeObjectURL(url);
+    } catch (exportError) {
+      setError(exportError instanceof Error ? exportError.message : "Could not export finance transactions.");
     }
   };
 
@@ -213,17 +274,21 @@ function Finance() {
           <h1>Financial transactions</h1>
           <p>{unitLeader ? `Your view is secured to ${assignedUnits.join(", ") || "your assigned units"}.` : "Track income, expenses, and the current financial position across your authorized ScoutOS scope."}</p>
         </div>
-        <button className="button button-primary" onClick={openCreate} type="button"><Icon name="plus" size={18} />Add transaction</button>
+        <div className="finance-header-actions">
+          <button className="button button-secondary" onClick={() => { void exportCsv(); }} type="button">Export CSV</button>
+          <button className="button button-primary" onClick={openCreate} type="button"><Icon name="plus" size={18} />Add transaction</button>
+        </div>
       </header>
 
       {error && <div className="form-error finance-error">{error}</div>}
+      {notice && <div className="page-success">{notice}</div>}
 
       <section className="metrics-grid finance-metrics" aria-label="Financial dashboard">
         <article className={`metric-card finance-balance-card ${summary.balance < 0 ? "is-debt" : summary.balance > 0 ? "is-positive" : "is-even"}`} aria-live="polite"><span className="metric-icon"><Icon name="wallet" size={22} /></span><div><p>{scopeLabel}</p><strong>{formatMoney(Math.abs(summary.balance))}</strong><small>{balanceLabel}</small></div><p className="finance-balance-description">{balanceDescription}</p></article>
-        <article className="metric-card"><span className="metric-icon green"><Icon name="wallet" size={22} /></span><div><p>Total income</p><strong>{formatMoney(summary.totalIncome)}</strong><small>Excludes cancelled</small></div></article>
-        <article className="metric-card"><span className="metric-icon gold"><Icon name="calendar" size={22} /></span><div><p>Total expenses</p><strong>{formatMoney(summary.totalExpenses)}</strong><small>Excludes cancelled</small></div></article>
+        <article className="metric-card"><span className="metric-icon green"><Icon name="wallet" size={22} /></span><div><p>Total income</p><strong>{formatMoney(summary.totalIncome)}</strong><small>Approved only</small></div></article>
+        <article className="metric-card"><span className="metric-icon gold"><Icon name="calendar" size={22} /></span><div><p>Total expenses</p><strong>{formatMoney(summary.totalExpenses)}</strong><small>Approved only</small></div></article>
         <article className="metric-card"><span className="metric-icon blue"><Icon name="events" size={22} /></span><div><p>Debt</p><strong>{formatMoney(summary.debt)}</strong><small>{summary.debt > 0 ? "Deficit to resolve" : "No debt recorded"}</small></div></article>
-        <article className="metric-card"><span className="metric-icon green"><Icon name="folder" size={22} /></span><div><p>Pending</p><strong>{summary.pending}</strong><small>Awaiting completion</small></div></article>
+        <article className="metric-card"><span className="metric-icon green"><Icon name="folder" size={22} /></span><div><p>Submitted</p><strong>{summary.pending}</strong><small>Awaiting Admin approval</small></div></article>
         <article className="metric-card"><span className="metric-icon blue"><Icon name="events" size={22} /></span><div><p>Transactions</p><strong>{summary.transactions}</strong><small>Matching records</small></div></article>
       </section>
 
@@ -240,13 +305,68 @@ function Finance() {
           <label className="finance-date-filter"><span>To</span><input aria-label="Date to" type="date" value={filters.dateTo || ""} onChange={(event) => updateFilter("dateTo", event.target.value)} /></label>
         </div>
         <div className="table-wrap"><table><thead><tr><th>Date</th><th>Description</th><th>Unit</th><th>Type</th><th>Category</th><th>Amount</th><th>Status</th><th>Actions</th></tr></thead><tbody>
-          {transactions.map((transaction) => <tr key={transaction.id}><td>{formatDate(transaction.transactionDate)}</td><td><strong>{transaction.description}</strong><span className="finance-subtle">{transaction.vendorPaidTo || transaction.referenceNumber || "No vendor or reference"}</span></td><td><span className="unit-pill" dir="rtl">{transaction.unit}</span></td><td><span className={`finance-type ${transaction.transactionType.toLowerCase()}`}>{titleCase(transaction.transactionType)}</span></td><td>{transaction.category}</td><td><strong>{formatMoney(transaction.amount)}</strong><span className="finance-subtle">{transaction.paymentMethod}</span></td><td><span className={`finance-status ${transaction.status.toLowerCase()}`}>{titleCase(transaction.status)}</span></td><td><div className="table-actions"><button aria-label={`View ${transaction.description}`} title="View" type="button" onClick={() => openTransaction(transaction, true)}><Icon name="eye" size={16} /></button><button aria-label={`Edit ${transaction.description}`} title="Edit" type="button" onClick={() => openTransaction(transaction, false)}><Icon name="edit" size={16} /></button><button className="danger" aria-label={`Delete ${transaction.description}`} title="Delete" type="button" onClick={() => removeTransaction(transaction)}><Icon name="trash" size={16} /></button></div></td></tr>)}
+          {transactions.map((transaction) => {
+            const editable = transaction.status === "DRAFT" || transaction.status === "REJECTED";
+            const busy = actionBusyId === transaction.id;
+            return <tr key={transaction.id}>
+              <td>{formatDate(transaction.transactionDate)}</td>
+              <td><strong>{transaction.description}</strong><span className="finance-subtle">{transaction.reversalOfId ? `Reverses #${transaction.reversalOfId}` : transaction.vendorPaidTo || transaction.referenceNumber || "No vendor or reference"}</span></td>
+              <td><span className="unit-pill" dir="rtl">{transaction.unit}</span></td>
+              <td><span className={`finance-type ${transaction.transactionType.toLowerCase()}`}>{titleCase(transaction.transactionType)}</span></td>
+              <td>{transaction.category}</td>
+              <td><strong>{formatMoney(transaction.amount)}</strong><span className="finance-subtle">{transaction.paymentMethod}</span></td>
+              <td><span className={`finance-status ${transaction.status.toLowerCase()}`}>{titleCase(transaction.status)}</span></td>
+              <td><div className="table-actions finance-row-actions">
+                <button aria-label={`View ${transaction.description}`} disabled={busy} title="View" type="button" onClick={() => openTransaction(transaction, true)}><Icon name="eye" size={16} /></button>
+                {editable && <button aria-label={`Edit ${transaction.description}`} disabled={busy} title="Edit draft" type="button" onClick={() => openTransaction(transaction, false)}><Icon name="edit" size={16} /></button>}
+                {editable && <button className="finance-action-button" disabled={busy} onClick={() => { void submitForApproval(transaction); }} type="button">Submit</button>}
+                {canApprove && transaction.status === "SUBMITTED" && <button className="finance-action-button approve" disabled={busy} onClick={() => approve(transaction)} type="button">Approve</button>}
+                {canApprove && transaction.status === "SUBMITTED" && <button className="finance-action-button" disabled={busy} onClick={() => reject(transaction)} type="button">Reject</button>}
+                {["DRAFT", "SUBMITTED", "REJECTED"].includes(transaction.status) && <button className="danger" aria-label={`Cancel ${transaction.description}`} disabled={busy} title="Cancel and preserve history" type="button" onClick={() => cancel(transaction)}><Icon name="x" size={16} /></button>}
+                {canApprove && transaction.status === "APPROVED" && !transaction.reversalOfId && !transaction.reversingTransactionId && <button className="finance-action-button" disabled={busy} onClick={() => reverse(transaction)} type="button">Reverse</button>}
+              </div></td>
+            </tr>;
+          })}
         </tbody></table></div>
         {loading && <div className="empty-state"><p>Loading financial transactions...</p></div>}
         {!loading && transactions.length === 0 && <div className="empty-state"><span><Icon name="wallet" size={25} /></span><h3>No transactions found</h3><p>Adjust the filters or record the first transaction in your permitted scope.</p><button className="button button-primary empty-state-button" type="button" onClick={openCreate}><Icon name="plus" size={17} />Add transaction</button></div>}
       </section>
 
-      {modalOpen && <div className="modal-backdrop" role="presentation" onMouseDown={closeModal}><div className="modal finance-modal" role="dialog" aria-modal="true" aria-labelledby="finance-form-title" onMouseDown={(event) => event.stopPropagation()}><div className="modal-heading"><div><span className="eyebrow">{readOnly ? "Transaction details" : editing ? "Correct transaction" : "New financial record"}</span><h2 id="finance-form-title">{readOnly ? "View transaction" : editing ? "Edit transaction" : "Add transaction"}</h2></div><button className="round-button" aria-label="Close" disabled={saving} onClick={closeModal} type="button"><Icon name="x" size={18} /></button></div>{error && <div className="form-error">{error}</div>}<form className="scout-form finance-form" onSubmit={saveTransaction}><fieldset disabled={readOnly || saving}><label className="field"><span>Transaction type</span><select value={form.transactionType} onChange={(event) => setForm({ ...form, transactionType: event.target.value as FinanceTransactionType })}>{financeTransactionTypes.map((type) => <option key={type} value={type}>{titleCase(type)}</option>)}</select></label><label className="field"><span>Status</span><select value={form.status} onChange={(event) => setForm({ ...form, status: event.target.value as FinanceStatus })}>{financeStatuses.map((status) => <option key={status} value={status}>{titleCase(status)}</option>)}</select></label><label className="field"><span>Unit</span>{unitLocked ? <input disabled value={user?.unit || ""} /> : <select value={form.unit} onChange={(event) => setForm({ ...form, unit: event.target.value as ScoutUnit })}>{scoutUnits.map((unit) => <option key={unit} value={unit}>{unit}</option>)}</select>}</label><label className="field"><span>Transaction date</span><input required type="date" value={form.transactionDate} onChange={(event) => setForm({ ...form, transactionDate: event.target.value })} /></label><label className="field"><span>Category</span><input required list="finance-categories" value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })} /><datalist id="finance-categories">{availableCategories.map((category) => <option key={category} value={category} />)}</datalist></label><label className="field"><span>Amount (JOD)</span><input required min="0.01" step="0.01" type="number" value={form.amount || ""} onChange={(event) => setForm({ ...form, amount: Number(event.target.value) })} /></label><label className="field field-wide"><span>Description</span><input required value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="What was this transaction for?" /></label><label className="field"><span>Vendor / paid to</span><input value={form.vendorPaidTo} onChange={(event) => setForm({ ...form, vendorPaidTo: event.target.value })} placeholder="Supplier or recipient" /></label><label className="field"><span>Payment method</span><select value={form.paymentMethod} onChange={(event) => setForm({ ...form, paymentMethod: event.target.value as FinanceTransactionInput["paymentMethod"] })}>{financePaymentMethods.map((method) => <option key={method}>{method}</option>)}</select></label><label className="field field-wide"><span>Reference number</span><input value={form.referenceNumber} onChange={(event) => setForm({ ...form, referenceNumber: event.target.value })} placeholder="Invoice, receipt, or transfer reference" /></label><label className="field field-wide"><span>Notes</span><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} placeholder="Optional internal notes" /></label></fieldset>{auditVisible && editing && <div className="finance-audit"><div><span>Created by</span><strong>{editing.createdBy?.fullName || "Former ScoutOS user"}</strong><small>{formatTimestamp(editing.createdAt)}</small></div><div><span>Last updated by</span><strong>{editing.updatedBy?.fullName || "Former ScoutOS user"}</strong><small>{formatTimestamp(editing.updatedAt)}</small></div></div>}<div className="form-actions field-wide"><button className="button button-secondary" disabled={saving} type="button" onClick={closeModal}>{readOnly ? "Close" : "Cancel"}</button>{!readOnly && <button className="button button-primary" disabled={saving} type="submit"><Icon name="check" size={18} />{saving ? "Saving..." : editing ? "Save correction" : "Create transaction"}</button>}</div></form></div></div>}
+      {modalOpen && (
+        <div className="modal-backdrop" role="presentation" onMouseDown={closeModal}>
+          <div className="modal finance-modal" role="dialog" aria-modal="true" aria-labelledby="finance-form-title" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="modal-heading">
+              <div><span className="eyebrow">{readOnly ? "Transaction details" : editing ? "Correct draft" : "New financial record"}</span><h2 id="finance-form-title">{readOnly ? "View transaction" : editing ? "Edit transaction" : "Add transaction"}</h2></div>
+              <button className="round-button" aria-label="Close" disabled={saving} onClick={closeModal} type="button"><Icon name="x" size={18} /></button>
+            </div>
+            {error && <div className="form-error">{error}</div>}
+            {editing && <div className="finance-current-state"><span className={`finance-status ${editing.status.toLowerCase()}`}>{titleCase(editing.status)}</span><small>{editing.reversalOfId ? `Approved reversal of #${editing.reversalOfId}` : editing.reversingTransactionId ? `Reversed by #${editing.reversingTransactionId}` : "Status changes are recorded permanently."}</small></div>}
+            {!editing && <div className="finance-current-state"><span className="finance-status draft">Draft</span><small>New records start as drafts and do not affect the balance until approved.</small></div>}
+            <form className="scout-form finance-form" onSubmit={saveTransaction}>
+              <fieldset disabled={readOnly || saving}>
+                <label className="field"><span>Transaction type</span><select value={form.transactionType} onChange={(event) => setForm({ ...form, transactionType: event.target.value as FinanceTransactionType })}>{financeTransactionTypes.map((type) => <option key={type} value={type}>{titleCase(type)}</option>)}</select></label>
+                <label className="field"><span>Unit</span>{unitLocked ? <input disabled value={user?.unit || ""} /> : <select value={form.unit} onChange={(event) => setForm({ ...form, unit: event.target.value as ScoutUnit })}>{scoutUnits.map((unit) => <option key={unit} value={unit}>{unit}</option>)}</select>}</label>
+                <label className="field"><span>Transaction date</span><input required type="date" value={form.transactionDate} onChange={(event) => setForm({ ...form, transactionDate: event.target.value })} /></label>
+                <label className="field"><span>Category</span><input required list="finance-categories" value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value })} /><datalist id="finance-categories">{availableCategories.map((category) => <option key={category} value={category} />)}</datalist></label>
+                <label className="field"><span>Amount (JOD)</span><input required min="0.01" step="0.01" type="number" value={form.amount || ""} onChange={(event) => setForm({ ...form, amount: Number(event.target.value) })} /></label>
+                <label className="field field-wide"><span>Description</span><input required value={form.description} onChange={(event) => setForm({ ...form, description: event.target.value })} placeholder="What was this transaction for?" /></label>
+                <label className="field"><span>Vendor / paid to</span><input value={form.vendorPaidTo} onChange={(event) => setForm({ ...form, vendorPaidTo: event.target.value })} placeholder="Supplier or recipient" /></label>
+                <label className="field"><span>Payment method</span><select value={form.paymentMethod} onChange={(event) => setForm({ ...form, paymentMethod: event.target.value as FinanceTransactionInput["paymentMethod"] })}>{financePaymentMethods.map((method) => <option key={method}>{method}</option>)}</select></label>
+                <label className="field field-wide"><span>Reference number</span><input value={form.referenceNumber} onChange={(event) => setForm({ ...form, referenceNumber: event.target.value })} placeholder="Invoice, receipt, or transfer reference" /></label>
+                <label className="field field-wide"><span>Notes</span><textarea value={form.notes} onChange={(event) => setForm({ ...form, notes: event.target.value })} placeholder="Optional internal notes" /></label>
+              </fieldset>
+              {editing && <div className="finance-audit">
+                <div><span>Created by</span><strong>{editing.createdBy?.fullName || "Former ScoutOS user"}</strong><small>{formatTimestamp(editing.createdAt)}</small></div>
+                <div><span>Last updated by</span><strong>{editing.updatedBy?.fullName || "Former ScoutOS user"}</strong><small>{formatTimestamp(editing.updatedAt)}</small></div>
+                <div><span>Approved by</span><strong>{editing.approvedBy?.fullName || "Not approved"}</strong><small>{editing.approvedAt ? formatTimestamp(editing.approvedAt) : "—"}</small></div>
+              </div>}
+              {editing?.rejectionReason && <div className="finance-rejection"><strong>Rejection reason</strong><p>{editing.rejectionReason}</p></div>}
+              {editing && <section className="finance-history"><h3>Status history</h3>{history.length === 0 ? <p>Loading history…</p> : history.map((entry) => <div key={entry.id}><span className={`finance-status ${entry.toStatus.toLowerCase()}`}>{titleCase(entry.toStatus)}</span><p>{entry.reason || "Status updated"}</p><small>{entry.changedBy?.fullName || "System"} · {formatTimestamp(entry.createdAt)}</small></div>)}</section>}
+              <div className="form-actions field-wide"><button className="button button-secondary" disabled={saving} type="button" onClick={closeModal}>{readOnly ? "Close" : "Cancel"}</button>{!readOnly && <button className="button button-primary" disabled={saving} type="submit"><Icon name="check" size={18} />{saving ? "Saving..." : editing ? "Save draft" : "Create draft"}</button>}</div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

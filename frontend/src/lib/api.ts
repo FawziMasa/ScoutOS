@@ -184,7 +184,7 @@ export type ScoutEventInput = Omit<ScoutEvent, "id" | "createdBy" | "createdAt" 
 
 export const financeTransactionTypes = ["EXPENSE", "INCOME"] as const;
 export type FinanceTransactionType = (typeof financeTransactionTypes)[number];
-export const financeStatuses = ["COMPLETED", "PENDING", "CANCELLED"] as const;
+export const financeStatuses = ["DRAFT", "SUBMITTED", "APPROVED", "REJECTED", "CANCELLED"] as const;
 export type FinanceStatus = (typeof financeStatuses)[number];
 export const financePaymentMethods = ["Cash", "Bank Transfer", "Card", "Mobile Wallet", "Other"] as const;
 export type FinancePaymentMethod = (typeof financePaymentMethods)[number];
@@ -212,9 +212,23 @@ export type FinanceTransaction = {
   createdAt: string;
   updatedBy: FinanceActor;
   updatedAt: string;
+  approvedBy: FinanceActor;
+  approvedAt: string | null;
+  rejectionReason: string;
+  reversalOfId: number | null;
+  reversingTransactionId: number | null;
 };
 
-export type FinanceTransactionInput = Omit<FinanceTransaction, "id" | "createdBy" | "createdAt" | "updatedBy" | "updatedAt">;
+export type FinanceTransactionInput = Omit<FinanceTransaction, "id" | "status" | "createdBy" | "createdAt" | "updatedBy" | "updatedAt" | "approvedBy" | "approvedAt" | "rejectionReason" | "reversalOfId" | "reversingTransactionId">;
+
+export type FinanceStatusHistory = {
+  id: number;
+  fromStatus: FinanceStatus | null;
+  toStatus: FinanceStatus;
+  reason: string;
+  changedBy: FinanceActor;
+  createdAt: string;
+};
 
 export type FinanceFilters = {
   search?: string;
@@ -631,7 +645,23 @@ export const api = {
         method: "PUT",
         body: JSON.stringify(input),
       }),
-    remove: (id: number) => request<void>(`/finance/transactions/${id}`, { method: "DELETE" }),
+    submit: (id: number) => request<{ transaction: FinanceTransaction }>(`/finance/transactions/${id}/submit`, { method: "POST" }),
+    approve: (id: number) => request<{ transaction: FinanceTransaction }>(`/finance/transactions/${id}/approve`, { method: "POST" }),
+    reject: (id: number, reason: string) => request<{ transaction: FinanceTransaction }>(`/finance/transactions/${id}/reject`, { method: "POST", body: JSON.stringify({ reason }) }),
+    cancel: (id: number, reason: string) => request<{ transaction: FinanceTransaction }>(`/finance/transactions/${id}/cancel`, { method: "POST", body: JSON.stringify({ reason }) }),
+    reverse: (id: number, reason: string) => request<{ transaction: FinanceTransaction }>(`/finance/transactions/${id}/reverse`, { method: "POST", body: JSON.stringify({ reason }) }),
+    history: (id: number) => request<{ history: FinanceStatusHistory[] }>(`/finance/transactions/${id}/history`),
+    exportCsv: async (filters: FinanceFilters = {}) => {
+      const headers = new Headers();
+      const token = getToken();
+      if (token) headers.set("Authorization", `Bearer ${token}`);
+      const response = await fetch(`${API_URL}/finance/export.csv${buildQuery(filters)}`, { headers });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({}));
+        throw new Error(body.error || "Could not export finance transactions.");
+      }
+      return response.blob();
+    },
   },
 
   gallery: {

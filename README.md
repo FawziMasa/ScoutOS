@@ -26,7 +26,8 @@ backend; frontend navigation is only the matching user experience.
 - Unit-scoped attendance sessions, history, status/date/search filters.
 - Events and unit-scoped registration management.
 - Gallery albums, batch image upload, search, grid, and lightbox.
-- Finance transactions, scoped totals, balance/debt state, filters, and refresh.
+- Finance drafts, Admin approvals, immutable status history, approved reversals,
+  scope-safe CSV export, totals, balance/debt state, filters, and refresh.
 - Scout portal for own profile, points, and attendance history.
 
 ## Local development

@@ -109,12 +109,41 @@ const checks = [
     tables: ["finance_transactions"],
     sql: "SELECT COUNT(*) AS findings FROM finance_transactions WHERE amount <= 0",
   },
+  {
+    area: "Finance",
+    name: "Approved transactions carry approval evidence",
+    tables: ["finance_transactions"],
+    sql: "SELECT COUNT(*) AS findings FROM finance_transactions WHERE status = 'APPROVED' AND (approved_by IS NULL OR approved_at IS NULL)",
+  },
+  {
+    area: "Finance",
+    name: "Every transaction has append-only status history",
+    tables: ["finance_transactions", "finance_status_history"],
+    sql: `SELECT COUNT(*) AS findings
+          FROM finance_transactions transaction_record
+          LEFT JOIN finance_status_history history ON history.transaction_id = transaction_record.id
+          WHERE history.id IS NULL`,
+  },
+  {
+    area: "Finance",
+    name: "Reversals offset the linked approved transaction",
+    tables: ["finance_transactions"],
+    sql: `SELECT COUNT(*) AS findings
+          FROM finance_transactions reversal
+          LEFT JOIN finance_transactions original ON original.id = reversal.reversal_of_id
+          WHERE reversal.reversal_of_id IS NOT NULL
+            AND (original.id IS NULL OR original.status <> 'APPROVED'
+              OR reversal.status <> 'APPROVED' OR original.amount <> reversal.amount
+              OR original.transaction_type = reversal.transaction_type)`,
+  },
 ];
 
 const requiredIndexes = [
   "attendance_records.uq_attendance_session_scout",
   "account_invitations.uq_account_invitations_token_hash",
   "finance_transactions.idx_finance_transactions_unit_date",
+  "finance_transactions.uq_finance_transactions_reversal",
+  "finance_status_history.idx_finance_history_transaction",
   "gallery_albums.idx_gallery_albums_unit",
   "gallery_photos.idx_gallery_photos_album",
   "password_reset_tokens.uq_password_reset_token_hash",
