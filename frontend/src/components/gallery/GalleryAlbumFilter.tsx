@@ -7,6 +7,18 @@ type GalleryAlbumFilterProps = {
   onSelect: (albumId: number | "all") => void;
 };
 
+function albumDetails(album: GalleryAlbum) {
+  const details = [album.unit?.name || "All units"];
+  if (album.eventDate) {
+    details.push(new Date(`${album.eventDate}T00:00:00`).toLocaleDateString("en-GB", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    }));
+  }
+  return details.join(" · ");
+}
+
 function GalleryAlbumFilter({
   albums,
   selectedAlbumId,
@@ -29,9 +41,13 @@ function GalleryAlbumFilter({
           className={`gallery-album-chip ${selectedAlbumId === album.id ? "active" : ""}`}
           key={album.id}
           onClick={() => onSelect(album.id)}
+          title={album.description || albumDetails(album)}
           type="button"
         >
-          <span>{album.name}</span>
+          <span className="gallery-album-copy">
+            <span>{album.name}</span>
+            <small>{albumDetails(album)}</small>
+          </span>
           <strong>{album.photoCount}</strong>
         </button>
       ))}

@@ -12,7 +12,7 @@ check.
 | Take attendance | All units | All units | Assigned units | No |
 | Read private Scout data | All units | All units | Assigned units | Own record |
 | View leaderboard, events, Gallery | Yes | Yes | Yes | Yes |
-| Upload Gallery photos | Yes | Yes | Own uploads | No |
+| Upload Gallery photos | Yes | Yes | Assigned-unit albums | No |
 | Finance | All units | All units | Assigned units | No |
 
 ## Data model
@@ -40,3 +40,8 @@ unit values supplied by the browser.
 Deleting an account deactivates it and increments `session_version`; historical
 records keep their actor reference. Deleting a Scout through the API archives
 the Scout as inactive, preserving attendance and point history.
+
+Gallery albums may be group-wide or linked to one canonical unit. Unit Leaders
+can create and upload to albums in any of their assigned units, while Admins and
+Group Leaders can manage all albums. Scouts have a dedicated own-data portal and
+view-only access to the leaderboard, Events, and Gallery.

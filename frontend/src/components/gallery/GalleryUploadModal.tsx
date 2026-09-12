@@ -1,6 +1,12 @@
 import { useRef, useState, useEffect } from "react";
 import Icon from "../Icon";
-import { api, type GalleryAlbum, type GalleryPhoto } from "../../lib/api";
+import {
+  api,
+  getStoredUser,
+  type GalleryAlbum,
+  type GalleryPhoto,
+  type UnitRecord,
+} from "../../lib/api";
 
 type GalleryUploadModalProps = {
   albums: GalleryAlbum[];
@@ -41,10 +47,28 @@ function GalleryUploadModal({
   onClose,
   onUploaded,
 }: GalleryUploadModalProps) {
+  const user = getStoredUser();
+  const unitLeader = user?.role === "UNIT_LEADER";
+  const assignedUnitIds = new Set(user?.assignedUnits?.map((unit) => unit.id) || []);
+  const selectableAlbums = unitLeader
+    ? albums.filter((album) => album.unit && (
+        assignedUnitIds.has(album.unit.id) ||
+        user?.assignedUnits?.some((unit) => unit.name === album.unit?.name)
+      ))
+    : albums;
   const [selected, setSelected] = useState<SelectedUpload[]>([]);
   const [caption, setCaption] = useState("");
-  const [albumId, setAlbumId] = useState("default");
+  const [albumId, setAlbumId] = useState(
+    unitLeader ? String(selectableAlbums[0]?.id || "") : "default",
+  );
   const [albumName, setAlbumName] = useState("");
+  const [albumDescription, setAlbumDescription] = useState("");
+  const [albumUnitId, setAlbumUnitId] = useState(
+    unitLeader ? String(user?.assignedUnits?.[0]?.id || "") : "",
+  );
+  const [unitRecords, setUnitRecords] = useState<UnitRecord[]>(
+    unitLeader ? user?.assignedUnits || [] : [],
+  );
   const [eventDate, setEventDate] = useState("");
   const [dragging, setDragging] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -62,6 +86,11 @@ function GalleryUploadModal({
     },
     [],
   );
+
+  useEffect(() => {
+    if (unitLeader) return;
+    api.units().then(({ unitRecords: records }) => setUnitRecords(records)).catch(() => undefined);
+  }, [unitLeader]);
 
   const addFiles = (fileList: FileList | File[]) => {
     const incoming = Array.from(fileList);
@@ -120,6 +149,14 @@ function GalleryUploadModal({
       setError("Select at least one photo.");
       return;
     }
+    if (!albumName.trim() && !albumId) {
+      setError("Choose an authorized album or enter a new album name.");
+      return;
+    }
+    if (albumName.trim() && unitLeader && !albumUnitId) {
+      setError("Choose one of your assigned units for the new album.");
+      return;
+    }
 
     try {
       setUploading(true);
@@ -127,8 +164,11 @@ function GalleryUploadModal({
       const result = await api.gallery.upload({
         files: selected.map((item) => item.file),
         caption,
-        albumId: albumName.trim() ? null : albumId === "default" ? null : Number(albumId),
+        albumId: albumName.trim() ? null : albumId === "default" || !albumId ? null : Number(albumId),
         albumName: albumName.trim(),
+        albumDescription: albumDescription.trim(),
+        albumEventDate: eventDate,
+        albumUnitId: albumName.trim() && albumUnitId ? Number(albumUnitId) : null,
         eventDate,
       });
 
@@ -273,8 +313,9 @@ function GalleryUploadModal({
               onChange={(event) => setAlbumId(event.target.value)}
               value={albumId}
             >
-              <option value="default">Scout Moments</option>
-              {albums.map((album) => (
+              {!unitLeader && <option value="default">Scout Moments</option>}
+              {unitLeader && <option value="">Create a new unit album below</option>}
+              {selectableAlbums.map((album) => (
                 <option key={album.id} value={album.id}>
                   {album.name}
                 </option>
@@ -288,15 +329,37 @@ function GalleryUploadModal({
           </label>
 
           {canCreateAlbum && (
-            <label className="field field-wide">
-              <span>New album</span>
-              <input
-                maxLength={120}
-                onChange={(event) => setAlbumName(event.target.value)}
-                placeholder="Summer Camp 2026"
-                value={albumName}
-              />
-            </label>
+            <>
+              <label className="field field-wide">
+                <span>New album</span>
+                <input
+                  maxLength={120}
+                  onChange={(event) => setAlbumName(event.target.value)}
+                  placeholder="Summer Camp 2026"
+                  value={albumName}
+                />
+              </label>
+              {albumName.trim() && <label className="field field-wide">
+                <span>Album description</span>
+                <textarea
+                  maxLength={255}
+                  onChange={(event) => setAlbumDescription(event.target.value)}
+                  placeholder="Optional context about this activity or event"
+                  value={albumDescription}
+                />
+              </label>}
+              {albumName.trim() && <label className="field field-wide">
+                <span>Album unit</span>
+                <select
+                  required={unitLeader}
+                  value={albumUnitId}
+                  onChange={(event) => setAlbumUnitId(event.target.value)}
+                >
+                  {!unitLeader && <option value="">All units / group-wide</option>}
+                  {unitRecords.map((unit) => <option key={unit.id} value={unit.id}>{unit.name}</option>)}
+                </select>
+              </label>}
+            </>
           )}
         </div>
 

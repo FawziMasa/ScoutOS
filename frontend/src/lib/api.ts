@@ -277,6 +277,8 @@ export type GalleryAlbum = {
   name: string;
   slug: string;
   description: string;
+  eventDate: string;
+  unit: UnitRecord | null;
   photoCount: number;
   coverThumbnailUrl: string | null;
   latestPhotoAt: string;
@@ -293,6 +295,7 @@ export type GalleryPhoto = {
   caption: string;
   albumId: number;
   albumName: string;
+  albumUnit: UnitRecord | null;
   eventDate: string;
   uploadedBy: {
     id: string;
@@ -324,6 +327,9 @@ export type GalleryUploadInput = {
   caption?: string;
   albumId?: number | null;
   albumName?: string;
+  albumDescription?: string;
+  albumEventDate?: string;
+  albumUnitId?: number | null;
   eventDate?: string;
 };
 
@@ -626,10 +632,10 @@ export const api = {
         },
       })),
     albums: () => request<{ albums: GalleryAlbum[] }>("/gallery/albums"),
-    createAlbum: (name: string) =>
+    createAlbum: (input: { name: string; description?: string; eventDate?: string; unitId?: number | null }) =>
       request<{ album: GalleryAlbum }>("/gallery/albums", {
         method: "POST",
-        body: JSON.stringify({ name }),
+        body: JSON.stringify(input),
       }),
     upload: (input: GalleryUploadInput) => {
       const formData = new FormData();
@@ -637,6 +643,9 @@ export const api = {
       if (input.caption?.trim()) formData.append("caption", input.caption.trim());
       if (input.albumId) formData.append("albumId", String(input.albumId));
       if (input.albumName?.trim()) formData.append("albumName", input.albumName.trim());
+      if (input.albumDescription?.trim()) formData.append("albumDescription", input.albumDescription.trim());
+      if (input.albumEventDate) formData.append("albumEventDate", input.albumEventDate);
+      if (input.albumUnitId) formData.append("albumUnitId", String(input.albumUnitId));
       if (input.eventDate) formData.append("eventDate", input.eventDate);
       return request<GalleryUploadResult>("/gallery/photos", {
         method: "POST",

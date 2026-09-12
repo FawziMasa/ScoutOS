@@ -6,12 +6,19 @@ CREATE TABLE IF NOT EXISTS gallery_albums (
   name VARCHAR(120) NOT NULL,
   slug VARCHAR(140) NOT NULL,
   description VARCHAR(255) NULL,
+  event_date DATE NULL,
+  unit_id INT NULL,
   created_by INT NULL,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (id),
   UNIQUE KEY uq_gallery_albums_slug (slug),
+  INDEX idx_gallery_albums_event_date (event_date),
+  INDEX idx_gallery_albums_unit (unit_id),
   INDEX idx_gallery_albums_created_by (created_by),
+  CONSTRAINT fk_gallery_albums_unit
+    FOREIGN KEY (unit_id) REFERENCES units(id)
+    ON DELETE SET NULL,
   CONSTRAINT fk_gallery_albums_created_by
     FOREIGN KEY (created_by) REFERENCES users(id)
     ON DELETE SET NULL

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import Icon from "../Icon";
-import { api, type GalleryAlbum, type GalleryPhoto } from "../../lib/api";
+import { api, getStoredUser, type GalleryAlbum, type GalleryPhoto } from "../../lib/api";
 
 type GalleryViewerProps = {
   albums: GalleryAlbum[];
@@ -34,6 +34,17 @@ function GalleryViewer({
   onUpdated,
   photo,
 }: GalleryViewerProps) {
+  const user = getStoredUser();
+  const assignedUnitIds = new Set(user?.assignedUnits?.map((unit) => unit.id) || []);
+  const editableAlbums = user?.role === "UNIT_LEADER"
+    ? albums.filter((album) => (
+        album.id === photo.albumId ||
+        Boolean(album.unit && (
+          assignedUnitIds.has(album.unit.id) ||
+          user.assignedUnits?.some((unit) => unit.name === album.unit?.name)
+        ))
+      ))
+    : albums;
   const [imageFailed, setImageFailed] = useState(false);
   const [editing, setEditing] = useState(false);
   const [caption, setCaption] = useState(photo.caption);
@@ -134,9 +145,9 @@ function GalleryViewer({
               <label className="field">
                 <span>Album</span>
                 <select onChange={(event) => setAlbumId(event.target.value)} value={albumId}>
-                  {albums.map((album) => (
+                  {editableAlbums.map((album) => (
                     <option key={album.id} value={album.id}>
-                      {album.name}
+                      {album.name}{album.unit ? ` — ${album.unit.name}` : ""}
                     </option>
                   ))}
                 </select>
@@ -171,6 +182,10 @@ function GalleryViewer({
                 <div>
                   <dt>Event date</dt>
                   <dd>{formatDate(photo.eventDate)}</dd>
+                </div>
+                <div>
+                  <dt>Album unit</dt>
+                  <dd>{photo.albumUnit?.name || "All units"}</dd>
                 </div>
                 <div>
                   <dt>Size</dt>

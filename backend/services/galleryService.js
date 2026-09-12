@@ -10,7 +10,12 @@ import {
   persistGalleryImage,
   uploadGalleryImage,
 } from "./galleryStorage.js";
-import { isGlobalLeader, isOperationalLeader } from "./authorizationService.js";
+import {
+  assignedUnitNames,
+  isGlobalLeader,
+  isOperationalLeader,
+  userHasUnitAccess,
+} from "./authorizationService.js";
 
 export const MAX_GALLERY_FILES = 10;
 export const MAX_GALLERY_FILE_SIZE = 12 * 1024 * 1024;
@@ -66,13 +71,17 @@ function normalizeLimit(value) {
   return Math.min(limit, 48);
 }
 
-function canCreateAlbums(user) {
-  return isGlobalLeader(user);
+export function canCreateGalleryAlbums(user) {
+  return isOperationalLeader(user);
 }
 
-function canManagePhoto(user, photo) {
+export function canManageGalleryPhoto(user, photo) {
   return isOperationalLeader(user) && (
-    isGlobalLeader(user) || String(user.id) === String(photo.uploaded_by)
+    isGlobalLeader(user) ||
+    (
+      String(user.id) === String(photo.uploaded_by) &&
+      (!photo.album_unit_id || userHasUnitAccess(user, photo.album_unit_name))
+    )
   );
 }
 
@@ -107,19 +116,25 @@ function slugify(value) {
   return slug || randomUUID();
 }
 
+const albumSelect = `
+  SELECT album.*, unit_record.name AS unit_name
+  FROM gallery_albums album
+  LEFT JOIN units unit_record ON unit_record.id = album.unit_id
+`;
+
 async function findAlbumById(albumId) {
-  const [rows] = await db.execute("SELECT * FROM gallery_albums WHERE id = ? LIMIT 1", [albumId]);
+  const [rows] = await db.execute(`${albumSelect} WHERE album.id = ? LIMIT 1`, [albumId]);
   return rows[0] || null;
 }
 
 async function findAlbumByName(name) {
-  const [rows] = await db.execute("SELECT * FROM gallery_albums WHERE name = ? LIMIT 1", [name]);
+  const [rows] = await db.execute(`${albumSelect} WHERE album.name = ? LIMIT 1`, [name]);
   return rows[0] || null;
 }
 
 async function findDefaultAlbum() {
   const [rows] = await db.execute(
-    "SELECT * FROM gallery_albums WHERE slug = ? LIMIT 1",
+    `${albumSelect} WHERE album.slug = ? LIMIT 1`,
     [DEFAULT_GALLERY_ALBUM_SLUG],
   );
 
@@ -151,7 +166,50 @@ async function uniqueAlbumSlug(name) {
   return `${base}-${randomUUID()}`;
 }
 
-async function createAlbumFromName(name, user, { reuseExisting = false } = {}) {
+async function resolveAlbumUnit(user, rawUnitId) {
+  const unitId = normalizePositiveInt(rawUnitId, "Album unit");
+  if (!unitId) {
+    if (user.role !== "UNIT_LEADER") return null;
+    const assigned = Array.isArray(user.assignedUnits) ? user.assignedUnits : [];
+    if (assigned.length === 1) return assigned[0];
+    const legacyUnits = assignedUnitNames(user);
+    if (legacyUnits.length === 1) {
+      const [rows] = await db.execute(
+        "SELECT id, name FROM units WHERE active = 1 AND name = ? LIMIT 1",
+        [legacyUnits[0]],
+      );
+      if (rows[0]) return { id: Number(rows[0].id), name: rows[0].name };
+    }
+    throw createHttpError(400, "Select one of your assigned units for the new album.");
+  }
+
+  const [rows] = await db.execute(
+    "SELECT id, name FROM units WHERE id = ? AND active = 1 LIMIT 1",
+    [unitId],
+  );
+  const unit = rows[0];
+  if (!unit) throw createHttpError(400, "The selected album unit is invalid or inactive.");
+  if (user.role === "UNIT_LEADER" && !userHasUnitAccess(user, unit.name)) {
+    throw createHttpError(403, "You can only create Gallery albums for your assigned units.");
+  }
+  return { id: Number(unit.id), name: unit.name };
+}
+
+export function assertGalleryAlbumWriteAccess(user, album) {
+  if (isGlobalLeader(user)) return;
+  if (
+    user.role === "UNIT_LEADER" &&
+    album.unit_id &&
+    userHasUnitAccess(user, album.unit_name)
+  ) return;
+  throw createHttpError(403, "Select a Gallery album belonging to one of your assigned units.");
+}
+
+async function createAlbumFromName(
+  name,
+  user,
+  { reuseExisting = false, description = null, eventDate = null, unitId = null } = {},
+) {
   const albumName = trimOptional(name, 120, "Album name");
   if (!albumName || albumName.length < 2) {
     throw createHttpError(400, "Album name must be between 2 and 120 characters.");
@@ -159,46 +217,55 @@ async function createAlbumFromName(name, user, { reuseExisting = false } = {}) {
 
   const existing = await findAlbumByName(albumName);
   if (existing) {
-    if (reuseExisting) return existing;
+    if (reuseExisting) {
+      assertGalleryAlbumWriteAccess(user, existing);
+      return existing;
+    }
     throw createHttpError(409, "An album with that name already exists.");
   }
 
+  const albumDescription = trimOptional(description, 255, "Album description");
+  const albumEventDate = normalizeDate(eventDate, "Album date");
+  const albumUnit = await resolveAlbumUnit(user, unitId);
   const slug = await uniqueAlbumSlug(albumName);
   const createdBy = Number.isInteger(Number(user.id)) ? Number(user.id) : null;
   const [result] = await db.execute(
     `
-      INSERT INTO gallery_albums (name, slug, created_by, created_at, updated_at)
-      VALUES (?, ?, ?, NOW(), NOW())
+      INSERT INTO gallery_albums
+        (name, slug, description, event_date, unit_id, created_by, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())
     `,
-    [albumName, slug, createdBy],
+    [albumName, slug, albumDescription, albumEventDate, albumUnit?.id || null, createdBy],
   );
 
   return findAlbumById(result.insertId);
 }
 
-async function resolveAlbum(fields, user, fallbackAlbumId = null) {
+async function resolveAlbum(fields, user) {
   const albumName = trimOptional(firstField(fields, "albumName"), 120, "Album name");
   if (albumName) {
-    if (!canCreateAlbums(user)) {
-      throw createHttpError(403, "Only Admins and Group Leaders can create albums.");
+    if (!canCreateGalleryAlbums(user)) {
+      throw createHttpError(403, "Your account cannot create Gallery albums.");
     }
-    return createAlbumFromName(albumName, user, { reuseExisting: true });
+    return createAlbumFromName(albumName, user, {
+      reuseExisting: true,
+      description: firstField(fields, "albumDescription"),
+      eventDate: firstField(fields, "albumEventDate") || firstField(fields, "eventDate"),
+      unitId: firstField(fields, "albumUnitId"),
+    });
   }
 
   const albumId = normalizePositiveInt(firstField(fields, "albumId"), "Album");
   if (albumId) {
     const album = await findAlbumById(albumId);
     if (!album) throw createHttpError(400, "Selected album does not exist.");
+    assertGalleryAlbumWriteAccess(user, album);
     return album;
   }
 
-  if (fallbackAlbumId) {
-    const album = await findAlbumById(fallbackAlbumId);
-    if (!album) throw createHttpError(400, "Selected album does not exist.");
-    return album;
-  }
-
-  return findDefaultAlbum();
+  const album = await findDefaultAlbum();
+  assertGalleryAlbumWriteAccess(user, album);
+  return album;
 }
 
 function mapAlbum(row) {
@@ -207,6 +274,10 @@ function mapAlbum(row) {
     name: row.name,
     slug: row.slug,
     description: row.description || "",
+    eventDate: formatDateOnly(row.event_date),
+    unit: row.unit_id
+      ? { id: Number(row.unit_id), name: row.unit_name || row.album_unit_name || "" }
+      : null,
     photoCount: Number(row.photo_count || 0),
     coverThumbnailUrl: row.cover_thumbnail_url || null,
     latestPhotoAt: formatDateTime(row.latest_photo_at),
@@ -225,6 +296,9 @@ function mapPhoto(row, user = null) {
     caption: row.caption || "",
     albumId: Number(row.album_id),
     albumName: row.album_name || DEFAULT_GALLERY_ALBUM_NAME,
+    albumUnit: row.album_unit_id
+      ? { id: Number(row.album_unit_id), name: row.album_unit_name || "" }
+      : null,
     eventDate: formatDateOnly(row.event_date),
     uploadedBy: row.uploaded_by
       ? {
@@ -241,8 +315,8 @@ function mapPhoto(row, user = null) {
     height: row.height === null || row.height === undefined ? null : Number(row.height),
     createdAt: formatDateTime(row.created_at),
     updatedAt: formatDateTime(row.updated_at),
-    canEdit: user ? canManagePhoto(user, row) : false,
-    canDelete: user ? canManagePhoto(user, row) : false,
+    canEdit: user ? canManageGalleryPhoto(user, row) : false,
+    canDelete: user ? canManageGalleryPhoto(user, row) : false,
   };
 }
 
@@ -262,11 +336,14 @@ async function getPhotoRow(id) {
         p.*,
         a.name AS album_name,
         a.slug AS album_slug,
+        a.unit_id AS album_unit_id,
+        album_unit.name AS album_unit_name,
         u.full_name AS uploader_name,
         u.username AS uploader_username,
         u.role AS uploader_role
       FROM gallery_photos p
       INNER JOIN gallery_albums a ON a.id = p.album_id
+      LEFT JOIN units album_unit ON album_unit.id = a.unit_id
       LEFT JOIN users u ON u.id = p.uploaded_by
       WHERE p.id = ? AND p.status = 'active'
       LIMIT 1
@@ -395,6 +472,9 @@ export async function listGalleryAlbums() {
         a.name,
         a.slug,
         a.description,
+        a.event_date,
+        a.unit_id,
+        unit_record.name AS unit_name,
         a.created_by,
         a.created_at,
         a.updated_at,
@@ -402,6 +482,7 @@ export async function listGalleryAlbums() {
         cover.thumbnail_url AS cover_thumbnail_url,
         cover.created_at AS latest_photo_at
       FROM gallery_albums a
+      LEFT JOIN units unit_record ON unit_record.id = a.unit_id
       LEFT JOIN (
         SELECT album_id, COUNT(*) AS photo_count, MAX(id) AS latest_photo_id
         FROM gallery_photos
@@ -418,11 +499,15 @@ export async function listGalleryAlbums() {
 }
 
 export async function createGalleryAlbum(body, user) {
-  if (!canCreateAlbums(user)) {
-    throw createHttpError(403, "Only Admins and Group Leaders can create Gallery albums.");
+  if (!canCreateGalleryAlbums(user)) {
+    throw createHttpError(403, "Your account cannot create Gallery albums.");
   }
 
-  return mapAlbum(await createAlbumFromName(body?.name, user));
+  return mapAlbum(await createAlbumFromName(body?.name, user, {
+    description: body?.description,
+    eventDate: body?.eventDate,
+    unitId: body?.unitId,
+  }));
 }
 
 export async function listGalleryPhotos(params, user) {
@@ -461,11 +546,14 @@ export async function listGalleryPhotos(params, user) {
         p.*,
         a.name AS album_name,
         a.slug AS album_slug,
+        a.unit_id AS album_unit_id,
+        album_unit.name AS album_unit_name,
         u.full_name AS uploader_name,
         u.username AS uploader_username,
         u.role AS uploader_role
       FROM gallery_photos p
       INNER JOIN gallery_albums a ON a.id = p.album_id
+      LEFT JOIN units album_unit ON album_unit.id = a.unit_id
       LEFT JOIN users u ON u.id = p.uploaded_by
       WHERE ${where.join(" AND ")}
       ORDER BY p.id DESC
@@ -597,15 +685,19 @@ export async function updateGalleryPhoto(id, body, user) {
   const photoId = normalizePhotoId(id);
   const existing = await getPhotoRow(photoId);
   if (!existing) throw createHttpError(404, "Photo not found.");
-  if (!canManagePhoto(user, existing)) {
+  if (!canManageGalleryPhoto(user, existing)) {
     throw createHttpError(403, "You do not have permission to edit this photo.");
   }
 
-  const albumFields = {};
-  if (Object.prototype.hasOwnProperty.call(body || {}, "albumId")) {
+  let album = existing;
+  if (
+    Object.prototype.hasOwnProperty.call(body || {}, "albumId") &&
+    Number(body.albumId) !== Number(existing.album_id)
+  ) {
+    const albumFields = {};
     albumFields.albumId = [body.albumId];
+    album = await resolveAlbum(albumFields, user);
   }
-  const album = await resolveAlbum(albumFields, user, existing.album_id);
   const caption = trimOptional(body?.caption, 500, "Caption");
   const eventDate = normalizeDate(body?.eventDate, "Event date");
 
@@ -625,7 +717,7 @@ export async function deleteGalleryPhoto(id, user) {
   const photoId = normalizePhotoId(id);
   const existing = await getPhotoRow(photoId);
   if (!existing) throw createHttpError(404, "Photo not found.");
-  if (!canManagePhoto(user, existing)) {
+  if (!canManageGalleryPhoto(user, existing)) {
     throw createHttpError(403, "You do not have permission to delete this photo.");
   }
 

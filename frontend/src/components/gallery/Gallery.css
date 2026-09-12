@@ -139,10 +139,27 @@
   transition: 170ms ease;
 }
 
-.gallery-album-chip span {
+.gallery-album-chip > span:not(.gallery-album-copy),
+.gallery-album-copy > span {
   overflow: hidden;
   font-size: 12px;
   font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gallery-album-copy {
+  display: grid;
+  min-width: 0;
+  text-align: left;
+}
+
+.gallery-album-copy small {
+  overflow: hidden;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

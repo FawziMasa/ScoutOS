@@ -11,7 +11,7 @@ const pageSize = 24;
 
 function Gallery() {
   const user = getStoredUser();
-  const canCreateAlbum = user?.role === "ADMIN" || user?.role === "GROUP_LEADER";
+  const canCreateAlbum = Boolean(user && user.role !== "SCOUT");
   const canUpload = Boolean(user && user.role !== "SCOUT");
   const [albums, setAlbums] = useState<GalleryAlbum[]>([]);
   const [photos, setPhotos] = useState<GalleryPhoto[]>([]);
