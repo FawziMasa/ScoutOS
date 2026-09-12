@@ -8,6 +8,8 @@ Set these environment variables in Render for the backend service:
 FRONTEND_URL=https://your-frontend-domain.example
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
+SMTP_SECURE=false
+SMTP_FAMILY=4
 SMTP_USER=scoutssystem@gmail.com
 SMTP_PASS=your-google-app-password
 EMAIL_FROM="SCOUT OS <scoutssystem@gmail.com>"
