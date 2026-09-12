@@ -1,4 +1,4 @@
-export type UserRole = "ADMIN" | "GROUP_LEADER" | "UNIT_LEADER";
+export type UserRole = "ADMIN" | "GROUP_LEADER" | "UNIT_LEADER" | "SCOUT";
 
 export const scoutUnits = [
   "أشبال و زهرات",
@@ -10,6 +10,22 @@ export const scoutUnits = [
 
 export type ScoutUnit = (typeof scoutUnits)[number];
 export type ScoutStatus = "Active" | "Inactive";
+
+export type UnitRecord = {
+  id: number;
+  name: ScoutUnit;
+};
+
+export type UserPermissions = {
+  manageUsers: boolean;
+  manageScouts: boolean;
+  manageAttendance: boolean;
+  managePoints: boolean;
+  manageEvents: boolean;
+  manageGallery: boolean;
+  manageFinance: boolean;
+  viewOwnScoutData: boolean;
+};
 
 export const meetingTypes = [
   "Weekly Meeting",
@@ -30,8 +46,12 @@ export type AuthUser = {
   id: string;
   fullName: string;
   username: string;
+  email: string;
   role: UserRole;
   unit: ScoutUnit | null;
+  assignedUnits: UnitRecord[];
+  scoutId: string | null;
+  permissions: UserPermissions;
   active: boolean;
   createdAt: string;
 };
@@ -43,6 +63,9 @@ export type UserInput = {
   password?: string;
   role: UserRole;
   unit: ScoutUnit | null;
+  assignedUnitIds: number[];
+  scoutId: string | null;
+  active: boolean;
 };
 
 export type Scout = {
@@ -235,8 +258,10 @@ export type ScoutAttendanceProfileSummary = {
 export type PointsTransaction = {
   id: number;
   scoutId: string;
-  points: number;
+  pointsChange: number;
   reason: string;
+  leaderId: string;
+  leaderName: string;
   createdAt: string;
 };
 
@@ -400,6 +425,11 @@ function buildQuery(params: Record<string, string | number | boolean | null | un
   return queryString ? `?${queryString}` : "";
 }
 
+export function updateStoredUser(user: AuthUser) {
+  if (localStorage.getItem(tokenKey)) localStorage.setItem(userKey, JSON.stringify(user));
+  else if (sessionStorage.getItem(tokenKey)) sessionStorage.setItem(userKey, JSON.stringify(user));
+}
+
 function apiOrigin() {
   if (API_URL.startsWith("http://") || API_URL.startsWith("https://")) {
     return API_URL.replace(/\/api$/, "");
@@ -422,6 +452,8 @@ function normalizeGalleryPhoto(photo: GalleryPhoto): GalleryPhoto {
 }
 
 export const api = {
+  units: () => request<{ units: ScoutUnit[]; unitRecords: UnitRecord[] }>("/units", {}, false),
+
   setupStatus: () =>
     request<{ setupRequired: boolean }>("/auth/setup-status", {}, false),
 
@@ -468,6 +500,7 @@ export const api = {
 
   scouts: {
     list: () => request<{ scouts: Scout[] }>("/scouts"),
+    get: (id: string) => request<{ scout: Scout }>(`/scouts/${id}`),
     create: (input: ScoutInput) =>
       request<{ scout: Scout }>("/scouts", {
         method: "POST",
@@ -500,9 +533,10 @@ export const api = {
 
   attendance: {
     sessions: {
-      list: () => request<{ sessions: AttendanceSession[] }>("/attendance/sessions"),
-      get: (id: number) =>
-        request<AttendanceSessionDetail>(`/attendance/sessions/${id}`),
+      list: (filters: { unit?: ScoutUnit | "" } = {}) =>
+        request<{ sessions: AttendanceSession[] }>(`/attendance/sessions${buildQuery(filters)}`),
+      get: (id: number, filters: { unit?: ScoutUnit | "" } = {}) =>
+        request<AttendanceSessionDetail>(`/attendance/sessions/${id}${buildQuery(filters)}`),
       create: (input: AttendanceSessionInput) =>
         request<{ session: AttendanceSession }>("/attendance/sessions", {
           method: "POST",
@@ -528,11 +562,15 @@ export const api = {
   },
 
   points: {
-    add: (scoutId: string, pointsChange: number, reason: string) =>
+    add: (scoutId: string, pointsChange: number, reason: string) => {
+      const requestId = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`;
+      return (
       request<{ transaction: PointsTransaction }>("/points", {
         method: "POST",
-        body: JSON.stringify({ scoutId, pointsChange, reason }),
-      }),
+        body: JSON.stringify({ scoutId, pointsChange, reason, requestId }),
+      })
+      );
+    },
     leaderboard: () => request<{ leaderboard: LeaderboardEntry[] }>("/points/leaderboard"),
     history: (scoutId: string) =>
       request<{ transactions: PointsTransaction[] }>(`/points/scouts/${scoutId}/history`),
@@ -621,5 +659,6 @@ export const api = {
 export function roleLabel(role: UserRole) {
   if (role === "ADMIN") return "Administrator";
   if (role === "GROUP_LEADER") return "Group Leader";
-  return "Unit Leader";
+  if (role === "UNIT_LEADER") return "Unit Leader";
+  return "Scout";
 }

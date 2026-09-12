@@ -21,14 +21,16 @@ function scoutJoinDate(scout: Scout) {
     return scout.joinedAt || record.joined_at || "";
 }
 
-const units: ScoutUnit[] = [...scoutUnits];
+const allUnits: ScoutUnit[] = [...scoutUnits];
 
 function createEmptyForm(): ScoutInput {
     const user = getStoredUser();
     return {
         name: "",
         age: 10,
-        unit: user?.role === "UNIT_LEADER" && user.unit ? user.unit : scoutUnits[0],
+        unit: user?.role === "UNIT_LEADER"
+            ? user.assignedUnits?.[0]?.name || user.unit || scoutUnits[0]
+            : scoutUnits[0],
         phone: "",
         guardian: "",
         joinedAt: new Date().toISOString().slice(0, 10),
@@ -38,7 +40,10 @@ function createEmptyForm(): ScoutInput {
 
 function Scouts() {
     const user = getStoredUser();
-    const unitLocked = user?.role === "UNIT_LEADER";
+    const manageableUnits: ScoutUnit[] = user?.role === "UNIT_LEADER"
+        ? user.assignedUnits?.map((unit) => unit.name) || (user.unit ? [user.unit] : [])
+        : allUnits;
+    const unitLocked = user?.role === "UNIT_LEADER" && manageableUnits.length === 1;
     const [scouts, setScouts] = useState<Scout[]>([]);
     const [search, setSearch] = useState("");
     const [unitFilter, setUnitFilter] = useState("all");
@@ -145,14 +150,16 @@ function Scouts() {
     };
 
     const deleteScout = async (scout: Scout) => {
-        if (!window.confirm(`Remove ${scout.name} from ScoutOS?`)) return;
+        if (!window.confirm(`Archive ${scout.name}? Their history will be preserved and any linked login will stop working.`)) return;
 
         try {
             setError("");
             await api.scouts.remove(scout.id);
-            setScouts((current) => current.filter((record) => record.id !== scout.id));
+            setScouts((current) => current.map((record) =>
+                record.id === scout.id ? { ...record, status: "Inactive" } : record
+            ));
         } catch (deleteError) {
-            setError(deleteError instanceof Error ? deleteError.message : "Could not remove scout.");
+            setError(deleteError instanceof Error ? deleteError.message : "Could not archive Scout.");
         }
     };
 
@@ -163,8 +170,8 @@ function Scouts() {
                     <span className="eyebrow">People directory</span>
                     <h1>Scouts</h1>
                     <p>
-                        {unitLocked && user?.unit
-                            ? `You are viewing scouts assigned to ${user.unit}.`
+                        {user?.role === "UNIT_LEADER"
+                            ? `You are viewing Scouts from ${manageableUnits.join(", ") || "your assigned units"}.`
                             : "Manage the scout records your role is permitted to access."}
                     </p>
                 </div>
@@ -201,7 +208,7 @@ function Scouts() {
                     {!unitLocked && (
                         <select dir="rtl" value={unitFilter} onChange={(event) => setUnitFilter(event.target.value)}>
                             <option value="all">كل الوحدات</option>
-                            {units.map((unit) => <option key={unit} value={unit}>{unit}</option>)}
+                            {manageableUnits.map((unit) => <option key={unit} value={unit}>{unit}</option>)}
                         </select>
                     )}
                 </div>
@@ -285,7 +292,7 @@ function Scouts() {
                             <label className="field">
                                 <span>Unit</span>
                                 <select disabled={unitLocked} dir="rtl" value={form.unit} onChange={(event) => setForm({ ...form, unit: event.target.value as ScoutUnit })}>
-                                    {units.map((unit) => <option key={unit} value={unit}>{unit}</option>)}
+                                    {manageableUnits.map((unit) => <option key={unit} value={unit}>{unit}</option>)}
                                 </select>
                             </label>
                             <label className="field">
@@ -312,12 +319,12 @@ function Scouts() {
                                     <div style={{display: 'flex', gap: '20px', alignItems: 'flex-start'}}>
                                         <div style={{flex: 1}}>
                                             <h3>Points History</h3>
-                                            <p>Total: {scoutPoints.reduce((sum, t) => sum + t.points, 0)}</p>
+                                             <p>Total: {scoutPoints.reduce((sum, transaction) => sum + transaction.pointsChange, 0)}</p>
                                             <ul style={{listStyle: 'none', padding: 0, maxHeight: '200px', overflowY: 'auto'}}>
                                                 {scoutPoints.map(t => (
                                                     <li key={t.id} style={{display: 'flex', justifyContent: 'space-between', padding: '5px 0', fontSize: '0.9em'}}>
                                                         <span>{t.reason}</span>
-                                                        <strong>{t.points > 0 ? `+${t.points}` : t.points}</strong>
+                                                         <strong>{t.pointsChange > 0 ? `+${t.pointsChange}` : t.pointsChange}</strong>
                                                     </li>
                                                 ))}
                                             </ul>

@@ -7,7 +7,7 @@ import {
   financeStatuses,
   financeTransactionTypes,
   getStoredUser,
-  scoutUnits,
+  scoutUnits as configuredScoutUnits,
   type FinanceFilters,
   type FinanceStatus,
   type FinanceSummary,
@@ -77,9 +77,14 @@ function titleCase(value: string) {
 
 function Finance() {
   const user = getStoredUser();
-  const unitLocked = user?.role === "UNIT_LEADER";
+  const unitLeader = user?.role === "UNIT_LEADER";
+  const assignedUnits = unitLeader
+    ? user?.assignedUnits?.map((unit) => unit.name) || (user?.unit ? [user.unit] : [])
+    : [...configuredScoutUnits];
+  const scoutUnits = assignedUnits;
+  const unitLocked = unitLeader && assignedUnits.length === 1;
   const auditVisible = user?.role === "ADMIN";
-  const defaultUnit = unitLocked && user?.unit ? user.unit : scoutUnits[0];
+  const defaultUnit = assignedUnits[0] || configuredScoutUnits[0];
   const [filters, setFilters] = useState<FinanceFilters>({});
   const [transactions, setTransactions] = useState<FinanceTransaction[]>([]);
   const [summary, setSummary] = useState<FinanceSummary>(emptySummary);
@@ -194,8 +199,8 @@ function Finance() {
   const hasActiveFilters = Object.values(filters).some(Boolean);
   const scopeLabel = hasActiveFilters
     ? "Filtered balance"
-    : unitLocked && user?.unit
-      ? `Your ${user.unit} unit balance`
+    : unitLeader
+      ? `Your assigned units balance`
       : user?.role === "ADMIN"
         ? "Whole ScoutOS balance"
         : "Authorized scope balance";
@@ -206,7 +211,7 @@ function Finance() {
         <div>
           <span className="eyebrow">Finance & Procurement</span>
           <h1>Financial transactions</h1>
-          <p>{unitLocked && user?.unit ? `Your view is secured to ${user.unit}.` : "Track income, expenses, and the current financial position across your authorized ScoutOS scope."}</p>
+          <p>{unitLeader ? `Your view is secured to ${assignedUnits.join(", ") || "your assigned units"}.` : "Track income, expenses, and the current financial position across your authorized ScoutOS scope."}</p>
         </div>
         <button className="button button-primary" onClick={openCreate} type="button"><Icon name="plus" size={18} />Add transaction</button>
       </header>
@@ -227,7 +232,7 @@ function Finance() {
       <section className="panel table-panel finance-table-panel">
         <div className="finance-filters">
           <label className="search-field"><Icon name="search" size={18} /><input value={filters.search || ""} onChange={(event) => updateFilter("search", event.target.value)} placeholder="Search description, vendor, reference..." /></label>
-          {!unitLocked && <select aria-label="Filter by unit" value={filters.unit || ""} onChange={(event) => updateFilter("unit", event.target.value as ScoutUnit | "")}><option value="">All units</option>{scoutUnits.map((unit) => <option key={unit} value={unit}>{unit}</option>)}</select>}
+          {!unitLocked && <select aria-label="Filter by unit" value={filters.unit || ""} onChange={(event) => updateFilter("unit", event.target.value as ScoutUnit | "")}><option value="">{unitLeader ? "All my units" : "All units"}</option>{assignedUnits.map((unit) => <option key={unit} value={unit}>{unit}</option>)}</select>}
           <select aria-label="Filter by transaction type" value={filters.transactionType || ""} onChange={(event) => updateFilter("transactionType", event.target.value as FinanceTransactionType | "")}><option value="">All types</option>{financeTransactionTypes.map((type) => <option key={type} value={type}>{titleCase(type)}</option>)}</select>
           <select aria-label="Filter by category" value={filters.category || ""} onChange={(event) => updateFilter("category", event.target.value)}><option value="">All categories</option>{availableCategories.map((category) => <option key={category}>{category}</option>)}</select>
           <select aria-label="Filter by status" value={filters.status || ""} onChange={(event) => updateFilter("status", event.target.value as FinanceStatus | "")}><option value="">All statuses</option>{financeStatuses.map((status) => <option key={status} value={status}>{titleCase(status)}</option>)}</select>

@@ -1,25 +1,37 @@
 import { NavLink } from "react-router-dom";
 import Icon from "./Icon";
-import { getStoredUser } from "../lib/api";
+import type { AuthUser } from "../lib/api";
 
-const links = [
+const commonLinks = [
   { path: "/dashboard", label: "Overview", icon: "dashboard" as const },
-  { path: "/scouts", label: "Scouts", icon: "scouts" as const },
   { path: "/events", label: "Events", icon: "events" as const },
   { path: "/gallery", label: "Gallery", icon: "image" as const },
-  { path: "/attendance", label: "Attendance", icon: "attendance" as const },
   { path: "/leaderboard", label: "Leaderboard", icon: "shield" as const },
-  { path: "/finance", label: "Finance & Procurement", icon: "wallet" as const },
 ];
 
 type SidebarProps = {
   open: boolean;
   onClose: () => void;
+  user: AuthUser | null;
 };
 
-function Sidebar({ open, onClose }: SidebarProps) {
-  const user = getStoredUser();
-  const isAdmin = user?.role === "ADMIN";
+function Sidebar({ open, onClose, user }: SidebarProps) {
+  const isScout = user?.role === "SCOUT";
+  const isLeader = Boolean(user && user.role !== "SCOUT");
+  const links = [
+    ...commonLinks.slice(0, 1),
+    ...(isScout
+      ? [{ path: "/my-profile", label: "My Profile", icon: "scouts" as const }]
+      : [{ path: "/scouts", label: "Scouts", icon: "scouts" as const }]),
+    ...commonLinks.slice(1),
+    ...(isLeader
+      ? [
+          { path: "/attendance", label: "Attendance", icon: "attendance" as const },
+          { path: "/attendance-history", label: "Attendance History", icon: "calendar" as const },
+          { path: "/finance", label: "Finance & Procurement", icon: "wallet" as const },
+        ]
+      : []),
+  ];
 
   return (
     <>
@@ -57,7 +69,7 @@ function Sidebar({ open, onClose }: SidebarProps) {
               <Icon name="chevron" size={15} />
             </NavLink>
           ))}
-          {isAdmin && (
+          {user?.role === "ADMIN" && (
             <NavLink
               to="/users"
               onClick={onClose}
@@ -66,7 +78,7 @@ function Sidebar({ open, onClose }: SidebarProps) {
               }
             >
               <Icon name="users" />
-              <span>Manage Leaders</span>
+              <span>Manage Accounts</span>
               <Icon name="chevron" size={15} />
             </NavLink>
           )}

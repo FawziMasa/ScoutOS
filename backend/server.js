@@ -394,6 +394,21 @@ function validateScout(body) {
   return { value: scout };
 }
 
+function publicScout(scout) {
+  return {
+    id: scout.id,
+    name: scout.name,
+    age: Number(scout.age),
+    unit: scout.unit,
+    phone: scout.phone || "",
+    guardian: scout.guardian || "",
+    joinedAt: scout.joinedAt || (scout.joined_at ? String(scout.joined_at).slice(0, 10) : ""),
+    status: scout.status || "Active",
+    createdAt: scout.createdAt || scout.created_at,
+    updatedAt: scout.updatedAt || scout.updated_at,
+  };
+}
+
 function isRateLimited(key) {
   const now = Date.now();
   const recent = (loginAttempts.get(key) || []).filter((time) => now - time < 60_000);
@@ -770,7 +785,7 @@ const server = createServer(async (request, response) => {
         `SELECT * FROM scouts${scope.where} ORDER BY created_at DESC`,
         scope.values,
       );
-      return send(response, 200, { scouts });
+      return send(response, 200, { scouts: scouts.map(publicScout) });
     }
     if (path === "/api/scouts" && request.method === "POST") {
       requireAnyRole(user, LEADER_ROLES, "Scout accounts cannot create Scout records.");
@@ -809,7 +824,7 @@ const server = createServer(async (request, response) => {
         ]
       );
 
-      return send(response, 201, { scout });
+      return send(response, 201, { scout: publicScout(scout) });
     }
 
     const scoutMatch = path.match(/^\/api\/scouts\/([a-f0-9-]+)$/i);
@@ -833,7 +848,7 @@ const server = createServer(async (request, response) => {
       assertScoutReadAccess(user, scout);
 
       if (request.method === "GET") {
-        return send(response, 200, { scout });
+        return send(response, 200, { scout: publicScout(scout) });
       }
 
       if (request.method === "PUT") {
@@ -887,7 +902,7 @@ const server = createServer(async (request, response) => {
         );
 
         return send(response, 200, {
-          scout: updatedRows[0],
+          scout: publicScout(updatedRows[0]),
         });
       }
 

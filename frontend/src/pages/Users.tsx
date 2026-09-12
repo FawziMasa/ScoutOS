@@ -1,29 +1,54 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { FormEvent } from "react";
-import { api, type AuthUser, scoutUnits, type ScoutUnit, type UserInput, type UserRole } from "../lib/api";
 import Icon from "../components/Icon";
+import {
+  api,
+  type AuthUser,
+  type Scout,
+  type UnitRecord,
+  type UserInput,
+  type UserRole,
+} from "../lib/api";
 
-type UserForm = Omit<UserInput, "unit"> & {
-  password: string;
-  unit: ScoutUnit;
-};
+type AccountForm = UserInput & { password: string };
 
-function createEmptyUserForm(): UserForm {
+function emptyAccountForm(): AccountForm {
   return {
     fullName: "",
     username: "",
     email: "",
     password: "",
     role: "UNIT_LEADER",
-    unit: scoutUnits[0],
+    unit: null,
+    assignedUnitIds: [],
+    scoutId: null,
+    active: true,
   };
+}
+
+function assignmentLabel(user: AuthUser, scouts: Scout[]) {
+  if (user.role === "ADMIN" || user.role === "GROUP_LEADER") return "All units";
+  if (user.role === "SCOUT") {
+    return scouts.find((scout) => scout.id === user.scoutId)?.name || "Scout link unavailable";
+  }
+  return user.assignedUnits.map((unit) => unit.name).join(", ") || "No units";
 }
 
 function Users() {
   const [users, setUsers] = useState<AuthUser[]>([]);
+  const [unitRecords, setUnitRecords] = useState<UnitRecord[]>([]);
+  const [scouts, setScouts] = useState<Scout[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [form, setForm] = useState<UserForm>(createEmptyUserForm);
+  const [form, setForm] = useState<AccountForm>(emptyAccountForm);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState("");
+
+  const activeScouts = useMemo(
+    () => scouts.filter((scout) => scout.status === "Active"),
+    [scouts],
+  );
 
   const fetchUsers = async () => {
     const data = await api.users.list();
@@ -31,105 +56,143 @@ function Users() {
   };
 
   useEffect(() => {
-    api.users.list().then((data) => setUsers(data.users));
+    Promise.all([api.users.list(), api.units(), api.scouts.list()])
+      .then(([accountData, unitData, scoutData]) => {
+        setUsers(accountData.users);
+        setUnitRecords(unitData.unitRecords);
+        setScouts(scoutData.scouts);
+      })
+      .catch((loadError) => {
+        setError(loadError instanceof Error ? loadError.message : "Could not load account administration.");
+      })
+      .finally(() => setLoading(false));
   }, []);
 
-  const openEdit = (user: AuthUser) => {
-    setEditingId(user.id);
-    setForm({ fullName: user.fullName, username: user.username, email: "", password: "", role: user.role, unit: user.unit || scoutUnits[0] });
+  const openCreate = () => {
+    setEditingId(null);
+    setForm({
+      ...emptyAccountForm(),
+      assignedUnitIds: unitRecords[0] ? [unitRecords[0].id] : [],
+    });
+    setError("");
     setModalOpen(true);
   };
 
-  const deleteUser = async (id: string, name: string) => {
-    if (!window.confirm(`Are you sure you want to delete ${name}?`)) return;
-    await api.users.remove(id);
-    fetchUsers();
+  const openEdit = (user: AuthUser) => {
+    setEditingId(user.id);
+    setForm({
+      fullName: user.fullName,
+      username: user.username,
+      email: user.email,
+      password: "",
+      role: user.role,
+      unit: null,
+      assignedUnitIds: user.assignedUnits.map((unit) => unit.id),
+      scoutId: user.scoutId,
+      active: user.active,
+    });
+    setError("");
+    setModalOpen(true);
   };
 
-  const handleSubmit = async (e: FormEvent) => {
-    e.preventDefault();
+  const setRole = (role: UserRole) => {
+    setForm((current) => ({
+      ...current,
+      role,
+      assignedUnitIds:
+        role === "UNIT_LEADER"
+          ? current.assignedUnitIds.length
+            ? current.assignedUnitIds
+            : unitRecords[0]
+              ? [unitRecords[0].id]
+              : []
+          : [],
+      scoutId: role === "SCOUT" ? current.scoutId : null,
+    }));
+  };
+
+  const toggleUnit = (unitId: number) => {
+    setForm((current) => ({
+      ...current,
+      assignedUnitIds: current.assignedUnitIds.includes(unitId)
+        ? current.assignedUnitIds.filter((id) => id !== unitId)
+        : [...current.assignedUnitIds, unitId],
+    }));
+  };
+
+  const deactivateUser = async (account: AuthUser) => {
+    if (!window.confirm("Deactivate " + account.fullName + "? Existing sessions will stop working, while historical records stay intact.")) return;
     try {
-      if (editingId) {
-        await api.users.update(editingId, form);
-      } else {
-        await api.users.create(form);
-      }
-      alert(`Leader ${editingId ? 'updated' : 'created'} successfully!`);
+      await api.users.remove(account.id);
+      await fetchUsers();
+    } catch (removeError) {
+      setError(removeError instanceof Error ? removeError.message : "Could not deactivate this account.");
+    }
+  };
+
+  const handleSubmit = async (event: FormEvent) => {
+    event.preventDefault();
+    setSaving(true);
+    setError("");
+    try {
+      if (editingId) await api.users.update(editingId, form);
+      else await api.users.create(form);
+      await fetchUsers();
       setModalOpen(false);
       setEditingId(null);
-      setForm(createEmptyUserForm());
-      fetchUsers();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : "Failed to save user.");
+      setForm(emptyAccountForm());
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : "Could not save this account.");
+    } finally {
+      setSaving(false);
     }
   };
 
   return (
     <div className="page">
       <header className="page-header">
-        <h1>Manage Leaders</h1>
-        <button className="button button-primary" onClick={() => { setEditingId(null); setModalOpen(true); }}>
-            <Icon name="plus" size={18} />
-            Add Leader
-        </button>
+        <div><span className="eyebrow">Administration</span><h1>Manage Accounts</h1><p>Create leaders, assign multiple units, and link Scout logins safely.</p></div>
+        <button className="button button-primary" onClick={openCreate} type="button"><Icon name="plus" size={18} />Add account</button>
       </header>
+      {error && !modalOpen && <div className="form-error page-error">{error}</div>}
       <div className="panel table-panel">
-        <table>
-            <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Unit</th><th>Actions</th></tr></thead>
-            <tbody>
-                {users.map(user => <tr key={user.id}>
-                    <td>{user.fullName}</td>
-                    <td>{user.username}</td>
-                    <td>{user.role}</td>
-                    <td>{user.unit || "-"}</td>
-                    <td>
-                        <button className="button-icon" onClick={() => openEdit(user)}><Icon name="edit" size={16}/></button>
-                        <button className="button-icon danger" onClick={() => deleteUser(user.id, user.fullName)}><Icon name="trash" size={16}/></button>
-                    </td>
-                </tr>)}
-            </tbody>
-        </table>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Access / Link</th><th>Status</th><th><span className="sr-only">Actions</span></th></tr></thead>
+            <tbody>{users.map((account) => (
+              <tr key={account.id}>
+                <td><div className="person-cell"><span className="person-avatar">{account.fullName.split(" ").map((part) => part[0]).slice(0, 2).join("")}</span><div><strong>{account.fullName}</strong><span>{account.email}</span></div></div></td>
+                <td>{account.username}</td>
+                <td>{account.role.replaceAll("_", " ")}</td>
+                <td><span className="account-assignment" dir="auto">{assignmentLabel(account, scouts)}</span></td>
+                <td><span className={"status-pill " + (account.active ? "active" : "inactive")}>{account.active ? "Active" : "Inactive"}</span></td>
+                <td><div className="table-actions"><button aria-label={"Edit " + account.fullName} onClick={() => openEdit(account)} type="button"><Icon name="edit" size={16} /></button>{account.active && <button className="danger" aria-label={"Deactivate " + account.fullName} onClick={() => deactivateUser(account)} type="button"><Icon name="x" size={16} /></button>}</div></td>
+              </tr>
+            ))}</tbody>
+          </table>
+          {!loading && users.length === 0 && <div className="empty-state"><p>No accounts found.</p></div>}
+          {loading && <div className="empty-state"><p>Loading accounts…</p></div>}
+        </div>
       </div>
+
       {modalOpen && (
-        <div className="modal-backdrop" onClick={() => setModalOpen(false)}>
-            <div className="modal" onClick={e => e.stopPropagation()}>
-                <div className="modal-heading">
-                    <h2>{editingId ? "Edit Leader" : "Add Leader"}</h2>
-                    <button className="round-button" onClick={() => setModalOpen(false)}><Icon name="x" size={18} /></button>
-                </div>
-                <form className="scout-form" onSubmit={handleSubmit}>
-                    <label className="field field-wide"><span>Full Name</span>
-                        <input required placeholder="Full Name" value={form.fullName} onChange={e => setForm({...form, fullName: e.target.value})} />
-                    </label>
-                    <label className="field field-wide"><span>Username</span>
-                        <input required placeholder="Username" value={form.username} onChange={e => setForm({...form, username: e.target.value})} />
-                    </label>
-                    <label className="field field-wide"><span>Email Address</span>
-                        <input required type="email" placeholder="Email Address" value={form.email} onChange={e => setForm({...form, email: e.target.value})} />
-                    </label>
-                    {!editingId && <label className="field field-wide"><span>Password</span>
-                        <input required type="password" placeholder="Password" onChange={e => setForm({...form, password: e.target.value})} />
-                    </label>}
-                    <label className="field field-wide"><span>Role</span>
-                        <select value={form.role} onChange={e => setForm({...form, role: e.target.value as UserRole})}>
-                            <option value="UNIT_LEADER">Unit Leader</option>
-                            <option value="GROUP_LEADER">Group Leader</option>
-                            <option value="ADMIN">Admin</option>
-                        </select>
-                    </label>
-                    {form.role === "UNIT_LEADER" && (
-                        <label className="field field-wide"><span>Unit</span>
-                            <select value={form.unit} onChange={e => setForm({...form, unit: e.target.value as ScoutUnit})}>
-                                {scoutUnits.map(unit => <option key={unit} value={unit}>{unit}</option>)}
-                            </select>
-                        </label>
-                    )}
-                    <div className="form-actions field-wide">
-                        <button type="button" className="button button-secondary" onClick={() => setModalOpen(false)}>Cancel</button>
-                        <button type="submit" className="button button-primary">Save Leader</button>
-                    </div>
-                </form>
-            </div>
+        <div className="modal-backdrop" role="presentation" onMouseDown={() => !saving && setModalOpen(false)}>
+          <div className="modal account-modal" role="dialog" aria-modal="true" aria-labelledby="account-title" onMouseDown={(event) => event.stopPropagation()}>
+            <div className="modal-heading"><div><span className="eyebrow">{editingId ? "Update access" : "New login"}</span><h2 id="account-title">{editingId ? "Edit Account" : "Add Account"}</h2></div><button className="round-button" disabled={saving} onClick={() => setModalOpen(false)} type="button"><Icon name="x" size={18} /></button></div>
+            {error && <div className="form-error">{error}</div>}
+            <form className="scout-form" onSubmit={handleSubmit}>
+              <label className="field"><span>Full name</span><input required value={form.fullName} onChange={(event) => setForm({ ...form, fullName: event.target.value })} /></label>
+              <label className="field"><span>Username</span><input required value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} /></label>
+              <label className="field field-wide"><span>Email address</span><input required type="email" value={form.email} onChange={(event) => setForm({ ...form, email: event.target.value })} /></label>
+              <label className="field"><span>Role</span><select value={form.role} onChange={(event) => setRole(event.target.value as UserRole)}><option value="UNIT_LEADER">Unit Leader</option><option value="GROUP_LEADER">Group Leader</option><option value="ADMIN">Admin</option><option value="SCOUT">Scout</option></select></label>
+              <label className="field"><span>{editingId ? "New password (optional)" : "Initial password"}</span><input minLength={8} required={!editingId} type="password" value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></label>
+
+              {form.role === "UNIT_LEADER" && <fieldset className="field field-wide unit-assignment-field"><legend>Assigned units</legend><p>Select every unit this leader may manage.</p><div className="unit-checkbox-grid">{unitRecords.map((unit) => <label key={unit.id} className={form.assignedUnitIds.includes(unit.id) ? "selected" : ""}><input checked={form.assignedUnitIds.includes(unit.id)} onChange={() => toggleUnit(unit.id)} type="checkbox" /><span dir="rtl">{unit.name}</span></label>)}</div></fieldset>}
+              {form.role === "SCOUT" && <label className="field field-wide"><span>Linked Scout</span><select required value={form.scoutId || ""} onChange={(event) => setForm({ ...form, scoutId: event.target.value || null })}><option value="">Select an existing active Scout</option>{activeScouts.map((scout) => <option key={scout.id} value={scout.id}>{scout.name} — {scout.unit}</option>)}</select></label>}
+              <label className="account-active-toggle field-wide"><input checked={form.active} onChange={(event) => setForm({ ...form, active: event.target.checked })} type="checkbox" /><span><strong>Active account</strong><small>Inactive accounts cannot sign in and existing sessions are invalidated.</small></span></label>
+              <div className="form-actions field-wide"><button className="button button-secondary" disabled={saving} onClick={() => setModalOpen(false)} type="button">Cancel</button><button className="button button-primary" disabled={saving} type="submit"><Icon name="check" size={18} />{saving ? "Saving…" : "Save account"}</button></div>
+            </form>
+          </div>
         </div>
       )}
     </div>

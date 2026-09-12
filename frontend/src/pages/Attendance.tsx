@@ -4,7 +4,9 @@ import Icon from "../components/Icon";
 import {
   api,
   attendanceStatuses,
+  getStoredUser,
   meetingTypes,
+  scoutUnits,
   type AttendanceRecord,
   type AttendanceSaveRecord,
   type AttendanceSession,
@@ -12,6 +14,7 @@ import {
   type AttendanceStatus,
   type MeetingType,
   type Scout,
+  type ScoutUnit,
 } from "../lib/api";
 
 type Tab = "take" | "history";
@@ -158,6 +161,10 @@ function calculateSummary(scouts: Scout[], records: Record<string, DraftRecord>)
 }
 
 function Attendance() {
+  const user = getStoredUser();
+  const availableUnits: ScoutUnit[] = user?.role === "UNIT_LEADER"
+    ? user.assignedUnits?.map((unit) => unit.name) || (user.unit ? [user.unit] : [])
+    : [...scoutUnits];
   const [tab, setTab] = useState<Tab>("take");
   const [sessions, setSessions] = useState<AttendanceSession[]>([]);
   const [scouts, setScouts] = useState<Scout[]>([]);
@@ -166,6 +173,7 @@ function Attendance() {
   const [records, setRecords] = useState<Record<string, DraftRecord>>({});
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
+  const [unitFilter, setUnitFilter] = useState<"all" | ScoutUnit>("all");
   const [sortBy, setSortBy] = useState<SortBy>("alphabetical");
   const [loading, setLoading] = useState(true);
   const [loadingSession, setLoadingSession] = useState(false);
@@ -212,12 +220,16 @@ function Attendance() {
     };
   }, []);
 
-  const summary = useMemo(() => calculateSummary(scouts, records), [scouts, records]);
+  const scopedScouts = useMemo(
+    () => unitFilter === "all" ? scouts : scouts.filter((scout) => scout.unit === unitFilter),
+    [scouts, unitFilter],
+  );
+  const summary = useMemo(() => calculateSummary(scopedScouts, records), [scopedScouts, records]);
 
   const filteredScouts = useMemo(() => {
     const query = search.trim().toLowerCase();
 
-    return [...scouts]
+    return [...scopedScouts]
       .filter((scout) => {
         const draft = records[scout.id] || emptyDraft();
         const matchesStatus = statusFilter === "all" || draft.status === statusFilter;
@@ -246,7 +258,7 @@ function Attendance() {
 
         return left.name.localeCompare(right.name);
       });
-  }, [records, scouts, search, sortBy, statusFilter]);
+  }, [records, scopedScouts, search, sortBy, statusFilter]);
 
   function updateSessionField<Key extends keyof AttendanceSessionInput>(
     key: Key,
@@ -256,15 +268,39 @@ function Attendance() {
   }
 
   async function refreshSessions() {
-    const { sessions: sessionRecords } = await api.attendance.sessions.list();
+    const { sessions: sessionRecords } = await api.attendance.sessions.list({
+      unit: unitFilter === "all" ? "" : unitFilter,
+    });
     setSessions(sessionRecords);
     return sessionRecords;
+  }
+
+  async function changeUnitFilter(value: "all" | ScoutUnit) {
+    setUnitFilter(value);
+    try {
+      setLoadingSession(true);
+      const unit = value === "all" ? "" : value;
+      const { sessions: sessionRecords } = await api.attendance.sessions.list({ unit });
+      setSessions(sessionRecords);
+      if (activeSession) {
+        const detail = await api.attendance.sessions.get(activeSession.id, { unit });
+        setActiveSession(detail.session);
+        setRecords(buildDrafts(scouts, detail.records));
+        setHasSavedRecords(detail.records.length > 0);
+      }
+    } catch (error) {
+      showToast(error instanceof Error ? error.message : "Could not change attendance unit.", "error");
+    } finally {
+      setLoadingSession(false);
+    }
   }
 
   async function openSession(session: AttendanceSession) {
     try {
       setLoadingSession(true);
-      const detail = await api.attendance.sessions.get(session.id);
+      const detail = await api.attendance.sessions.get(session.id, {
+        unit: unitFilter === "all" ? "" : unitFilter,
+      });
       setActiveSession(detail.session);
       setSessionForm(formFromSession(detail.session));
       setRecords(buildDrafts(scouts, detail.records));
@@ -344,20 +380,23 @@ function Attendance() {
   }
 
   function selectAllPresent() {
-    setRecords(
-      scouts.reduce<Record<string, DraftRecord>>((drafts, scout) => {
+    setRecords((current) =>
+      scopedScouts.reduce<Record<string, DraftRecord>>((drafts, scout) => {
         drafts[scout.id] = {
-          ...(records[scout.id] || emptyDraft()),
+          ...(current[scout.id] || emptyDraft()),
           status: "present",
         };
         return drafts;
-      }, {}),
+      }, { ...current }),
     );
     showToast("All visible scouts marked present.");
   }
 
   function clearAll() {
-    setRecords(buildDrafts(scouts));
+    setRecords((current) => scopedScouts.reduce<Record<string, DraftRecord>>((drafts, scout) => {
+      drafts[scout.id] = emptyDraft();
+      return drafts;
+    }, { ...current }));
     showToast("Attendance cleared.");
   }
 
@@ -367,12 +406,12 @@ function Attendance() {
       return;
     }
 
-    if (scouts.length === 0) {
+    if (scopedScouts.length === 0) {
       showToast("Cannot save empty attendance.", "error");
       return;
     }
 
-    const payload: AttendanceSaveRecord[] = scouts.map((scout) => ({
+    const payload: AttendanceSaveRecord[] = scopedScouts.map((scout) => ({
       scoutId: scout.id,
       ...(records[scout.id] || emptyDraft()),
     }));
@@ -448,6 +487,23 @@ function Attendance() {
           Attendance History
         </button>
       </div>
+
+      <section className="panel attendance-scope-bar" aria-label="Attendance scope">
+        <label className="field">
+          <span>Unit</span>
+          <select
+            value={unitFilter}
+            onChange={(event) => void changeUnitFilter(event.target.value as "all" | ScoutUnit)}
+          >
+            <option value="all">{user?.role === "UNIT_LEADER" ? "All My Units" : "All Units"}</option>
+            {availableUnits.map((unit) => <option key={unit} value={unit}>{unit}</option>)}
+          </select>
+        </label>
+        <div>
+          <strong>{scopedScouts.length} Scouts in view</strong>
+          <span>Server-enforced access: {availableUnits.join(", ") || "No assigned units"}</span>
+        </div>
+      </section>
 
       {tab === "take" && (
         <>
@@ -613,9 +669,9 @@ function Attendance() {
 
             {activeSession && !loading && filteredScouts.length === 0 && (
               <div className="empty-state">
-                <span><Icon name={scouts.length === 0 ? "scouts" : "search"} size={25} /></span>
-                <h3>{scouts.length === 0 ? "No scouts found" : "No matching scouts"}</h3>
-                <p>{scouts.length === 0 ? "Add scouts first, then return to attendance." : "Try another search or status filter."}</p>
+                <span><Icon name={scopedScouts.length === 0 ? "scouts" : "search"} size={25} /></span>
+                <h3>{scopedScouts.length === 0 ? "No Scouts in this unit" : "No matching Scouts"}</h3>
+                <p>{scopedScouts.length === 0 ? "Choose another authorized unit or add Scouts first." : "Try another search or status filter."}</p>
               </div>
             )}
 

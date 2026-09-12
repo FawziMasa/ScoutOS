@@ -12,6 +12,7 @@ const pageSize = 24;
 function Gallery() {
   const user = getStoredUser();
   const canCreateAlbum = user?.role === "ADMIN" || user?.role === "GROUP_LEADER";
+  const canUpload = Boolean(user && user.role !== "SCOUT");
   const [albums, setAlbums] = useState<GalleryAlbum[]>([]);
   const [photos, setPhotos] = useState<GalleryPhoto[]>([]);
   const [selectedAlbumId, setSelectedAlbumId] = useState<number | "all">("all");
@@ -179,10 +180,10 @@ function Gallery() {
           <h1>Gallery</h1>
           <p>Moments from meetings, camps, trips, ceremonies, and service days shared across ScoutOS.</p>
         </div>
-        <button className="button button-primary" onClick={() => setUploadOpen(true)} type="button">
+        {canUpload && <button className="button button-primary" onClick={() => setUploadOpen(true)} type="button">
           <Icon name="upload" size={18} />
           Upload Photos
-        </button>
+        </button>}
       </header>
 
       {error && <div className="form-error page-error">{error}</div>}
@@ -197,14 +198,14 @@ function Gallery() {
               value={searchInput}
             />
           </label>
-          <button
+          {canUpload && <button
             className={`gallery-filter-button ${mineOnly ? "active" : ""}`}
             onClick={() => setMineOnly((current) => !current)}
             type="button"
           >
             <Icon name="users" size={17} />
             My Uploads
-          </button>
+          </button>}
         </div>
 
         <GalleryAlbumFilter
@@ -237,9 +238,9 @@ function Gallery() {
             <p>
               {search || mineOnly || selectedAlbumId !== "all"
                 ? "Try a different search or album filter."
-                : "Add the first shared ScoutOS photos for the group."}
+                : canUpload ? "Add the first shared ScoutOS photos for the group." : "No shared ScoutOS photos have been added yet."}
             </p>
-            {!search && !mineOnly && selectedAlbumId === "all" && (
+            {canUpload && !search && !mineOnly && selectedAlbumId === "all" && (
               <button className="button button-primary empty-state-button" onClick={() => setUploadOpen(true)} type="button">
                 <Icon name="upload" size={17} />
                 Upload Photos
@@ -262,7 +263,7 @@ function Gallery() {
         </section>
       )}
 
-      {uploadOpen && (
+      {canUpload && uploadOpen && (
         <GalleryUploadModal
           albums={albums}
           canCreateAlbum={canCreateAlbum}

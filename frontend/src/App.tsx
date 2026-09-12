@@ -15,10 +15,17 @@ import Register from "./pages/Register";
 import ResetPassword from "./pages/ResetPassword";
 import Scouts from "./pages/Scouts";
 import Users from "./pages/Users";
-import { getToken } from "./lib/api";
+import ScoutPortal from "./pages/ScoutPortal";
+import { getStoredUser, getToken, type UserRole } from "./lib/api";
+import type { ReactNode } from "react";
 
 function ProtectedRoute() {
   return getToken() ? <AppLayout /> : <Navigate to="/" replace />;
+}
+
+function RolePage({ allowed, children }: { allowed: UserRole[]; children: ReactNode }) {
+  const user = getStoredUser();
+  return user && allowed.includes(user.role) ? children : <Navigate to="/dashboard" replace />;
 }
 
 function App() {
@@ -32,14 +39,15 @@ function App() {
 
         <Route element={<ProtectedRoute />}>
           <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/scouts" element={<Scouts />} />
+          <Route path="/scouts" element={<RolePage allowed={["ADMIN", "GROUP_LEADER", "UNIT_LEADER"]}><Scouts /></RolePage>} />
+          <Route path="/my-profile" element={<RolePage allowed={["SCOUT"]}><ScoutPortal /></RolePage>} />
           <Route path="/leaderboard" element={<Leaderboard />} />
           <Route path="/events" element={<Events />} />
-          <Route path="/finance" element={<Finance />} />
+          <Route path="/finance" element={<RolePage allowed={["ADMIN", "GROUP_LEADER", "UNIT_LEADER"]}><Finance /></RolePage>} />
           <Route path="/gallery" element={<Gallery />} />
-          <Route path="/attendance" element={<Attendance />} />
-          <Route path="/attendance-history" element={<AttendanceHistory />} />
-          <Route path="/users" element={<Users />} />
+          <Route path="/attendance" element={<RolePage allowed={["ADMIN", "GROUP_LEADER", "UNIT_LEADER"]}><Attendance /></RolePage>} />
+          <Route path="/attendance-history" element={<RolePage allowed={["ADMIN", "GROUP_LEADER", "UNIT_LEADER"]}><AttendanceHistory /></RolePage>} />
+          <Route path="/users" element={<RolePage allowed={["ADMIN"]}><Users /></RolePage>} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

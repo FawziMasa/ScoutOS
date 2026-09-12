@@ -204,10 +204,10 @@ async function getSessionRow(id, user = null, requestedUnit = "") {
         SELECT
           session_id,
           COUNT(*) AS total_scouts,
-          SUM(status = 'present') AS present_count,
-          SUM(status = 'absent') AS absent_count,
-          SUM(status = 'late') AS late_count,
-          SUM(status = 'excused') AS excused_count
+          SUM(r.status = 'present') AS present_count,
+          SUM(r.status = 'absent') AS absent_count,
+          SUM(r.status = 'late') AS late_count,
+          SUM(r.status = 'excused') AS excused_count
         FROM attendance_records r
         INNER JOIN scouts sc ON sc.id = r.scout_id
         WHERE ${scope.condition}
@@ -243,10 +243,10 @@ export async function listSessions(user, filters = {}) {
       SELECT
         session_id,
         COUNT(*) AS total_scouts,
-        SUM(status = 'present') AS present_count,
-        SUM(status = 'absent') AS absent_count,
-        SUM(status = 'late') AS late_count,
-        SUM(status = 'excused') AS excused_count
+        SUM(r.status = 'present') AS present_count,
+        SUM(r.status = 'absent') AS absent_count,
+        SUM(r.status = 'late') AS late_count,
+        SUM(r.status = 'excused') AS excused_count
       FROM attendance_records r
       INNER JOIN scouts sc ON sc.id = r.scout_id
       WHERE ${scope.condition}

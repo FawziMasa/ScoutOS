@@ -1,14 +1,14 @@
 import { useNavigate } from "react-router-dom";
 import Icon from "./Icon";
-import { clearSession, getStoredUser, roleLabel } from "../lib/api";
+import { clearSession, roleLabel, type AuthUser } from "../lib/api";
 
 type NavbarProps = {
   onMenu: () => void;
+  user: AuthUser | null;
 };
 
-function Navbar({ onMenu }: NavbarProps) {
+function Navbar({ onMenu, user }: NavbarProps) {
   const navigate = useNavigate();
-  const user = getStoredUser();
   const displayName = user?.fullName || user?.username || "User";
   const initials = displayName
     .split(/\s+/)
