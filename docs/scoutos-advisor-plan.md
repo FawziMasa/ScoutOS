@@ -21,6 +21,9 @@ Date: 2026-09-12
   and count caps, authenticated unit-scoped downloads, and soft removal. The
   current MySQL binary store is intentionally a small-group bridge; external
   object storage remains the scale target.
+- Phase 3C turns Dashboard into a role-aware command center with partial-failure
+  handling, real refresh time, next-event context, Finance and attendance
+  attention items, unit activity, account invitation alerts, and Gallery data.
 
 ## Executive verdict
 

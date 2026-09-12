@@ -1,23 +1,15 @@
-import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import Icon from "../Icon";
-import { api, type GallerySummary } from "../../lib/api";
+import type { GallerySummary } from "../../lib/api";
 import "./Gallery.css";
 
-function DashboardGalleryPreview() {
-  const [summary, setSummary] = useState<GallerySummary | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
+type DashboardGalleryPreviewProps = {
+  error: boolean;
+  loading: boolean;
+  summary: GallerySummary | null;
+};
 
-  useEffect(() => {
-    api.gallery
-      .summary(4)
-      .then(({ summary: result }) => setSummary(result))
-      .catch((loadError) => {
-        setError(loadError instanceof Error ? loadError.message : "Gallery preview unavailable.");
-      })
-      .finally(() => setLoading(false));
-  }, []);
+function DashboardGalleryPreview({ error, loading, summary }: DashboardGalleryPreviewProps) {
 
   const latestPhotos = summary?.latestPhotos || [];
 

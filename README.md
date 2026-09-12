@@ -30,6 +30,8 @@ backend; frontend navigation is only the matching user experience.
   authenticated receipt files, scope-safe CSV export, totals, balance/debt
   state, filters, and refresh.
 - Scout portal for own profile, points, and attendance history.
+- Role-aware operations dashboard with live scope, action alerts, next event,
+  Finance, attendance, unit, account-invitation, and Gallery summaries.
 
 ## Local development
 
