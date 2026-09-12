@@ -77,6 +77,15 @@ const checks = [
           WHERE account.id IS NULL`,
   },
   {
+    area: "Accounts",
+    name: "Invitation tokens reference valid Scout accounts",
+    tables: ["account_invitations", "users"],
+    sql: `SELECT COUNT(*) AS findings
+          FROM account_invitations invitation
+          LEFT JOIN users account ON account.id = invitation.user_id
+          WHERE account.id IS NULL OR account.role <> 'SCOUT'`,
+  },
+  {
     area: "Gallery",
     name: "Gallery photos reference valid albums",
     tables: ["gallery_photos", "gallery_albums"],
@@ -104,6 +113,7 @@ const checks = [
 
 const requiredIndexes = [
   "attendance_records.uq_attendance_session_scout",
+  "account_invitations.uq_account_invitations_token_hash",
   "finance_transactions.idx_finance_transactions_unit_date",
   "gallery_albums.idx_gallery_albums_unit",
   "gallery_photos.idx_gallery_photos_album",

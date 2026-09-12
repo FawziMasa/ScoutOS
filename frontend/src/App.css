@@ -970,6 +970,30 @@ tbody tr:last-child td {
   background: #f5eaea;
 }
 
+.status-pill.invited {
+  color: #35667d;
+  background: #e6f1f6;
+}
+
+.status-pill.expired,
+.status-pill.invitation-failed {
+  color: #8a6128;
+  background: #f8eedc;
+}
+
+.account-status-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-items: flex-start;
+}
+
+.account-status-cell small {
+  color: var(--muted);
+  font-size: 8px;
+  white-space: nowrap;
+}
+
 .table-actions {
   display: flex;
   gap: 6px;
@@ -985,6 +1009,48 @@ tbody tr:last-child td {
 
 .table-actions button.danger {
   color: var(--danger);
+}
+
+.table-actions button.account-invite-action {
+  width: auto;
+  min-width: 54px;
+  padding: 0 9px;
+  color: var(--forest-700);
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.account-invitation-note {
+  display: flex;
+  padding: 13px 14px;
+  gap: 11px;
+  align-items: flex-start;
+  border: 1px solid #d7e7dc;
+  border-radius: 10px;
+  color: var(--forest-700);
+  background: var(--sage-50);
+}
+
+.account-invitation-note span {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.account-invitation-note small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
+.page-success {
+  margin-bottom: 18px;
+  padding: 12px 14px;
+  border: 1px solid #cce2d3;
+  border-radius: 9px;
+  color: #276847;
+  background: #edf7f0;
+  font-size: 11px;
 }
 
 .events-table-wrap table { min-width: 980px; }

@@ -20,7 +20,8 @@ backend; frontend navigation is only the matching user experience.
 ## Current modules
 
 - Account setup, login, session invalidation, and secure password reset.
-- Admin account management with Scout linkage and soft deactivation.
+- Admin-only Scout invitations with self-service password setup, explicit
+  invitation states, resend/revoke controls, and soft deactivation.
 - Multi-unit Scout CRUD, points ledger and leaderboard.
 - Unit-scoped attendance sessions, history, status/date/search filters.
 - Events and unit-scoped registration management.
@@ -103,7 +104,7 @@ For an explicit release step, run `npm run migrate`, then `npm run audit:data`.
 - Set `VITE_API_URL=https://<render-service>/api`.
 
 `frontend/vercel.json` rewrites browser routes to the SPA entry point, including
-the password-reset page with its query token.
+password-reset and Scout invitation pages.
 
 ## Operations and security notes
 
@@ -120,6 +121,7 @@ the password-reset page with its query token.
 
 See [access control](docs/access-control.md),
 [password reset deployment](docs/password-reset.md),
+[Scout account invitations](docs/account-invitations.md),
 [Gallery](docs/gallery.md), [Finance](docs/finance.md), and the
 [security/regression audit](docs/security-regression-audit.md). Production
 release, backup, restore, and rotation steps are in the

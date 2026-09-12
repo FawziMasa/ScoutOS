@@ -112,6 +112,8 @@ export async function hydrateUserAccess(database, account) {
     assignedUnits,
     scoutId: account.scoutId || account.scout_id || null,
     active: Boolean(account.active),
+    accountState: account.accountState || account.account_state || (Boolean(account.active) ? "ACTIVE" : "INACTIVE"),
+    invitationExpiresAt: account.invitationExpiresAt || account.invitation_expires_at || null,
     sessionVersion: Number(account.sessionVersion ?? account.session_version ?? 0),
     createdAt: account.createdAt || account.created_at,
   };

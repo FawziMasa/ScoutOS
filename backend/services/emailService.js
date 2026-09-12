@@ -156,6 +156,47 @@ export function createPasswordResetEmail(resetUrl) {
   return { text, html };
 }
 
+export function createScoutInvitationEmail({ fullName, username, invitationUrl }) {
+  const safeName = escapeHtml(fullName);
+  const safeUsername = escapeHtml(username);
+  const safeUrl = escapeHtml(invitationUrl);
+  const text = [
+    "SCOUT OS",
+    "",
+    `Welcome ${fullName}`,
+    "",
+    `Your ScoutOS username is: ${username}`,
+    "Choose your private password and activate your account:",
+    invitationUrl,
+    "",
+    "This invitation expires in 24 hours and can be used once.",
+    "If you were not expecting this invitation, contact your ScoutOS Administrator.",
+  ].join("\n");
+
+  const html = `<!doctype html>
+<html lang="en">
+  <body style="margin:0;padding:32px 16px;background:#f4f7f4;color:#17231c;font-family:Arial,sans-serif;">
+    <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0">
+      <tr><td align="center">
+        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="max-width:560px;background:#ffffff;border:1px solid #dbe5dd;border-radius:12px;overflow:hidden;">
+          <tr><td style="padding:28px 36px;background:#143c2d;color:#ffffff;"><div style="font-size:13px;font-weight:700;letter-spacing:1.5px;">SCOUT OS</div></td></tr>
+          <tr><td style="padding:36px;">
+            <h1 style="margin:0 0 14px;font-size:25px;line-height:1.25;color:#17231c;">Welcome to ScoutOS</h1>
+            <p style="margin:0 0 16px;font-size:15px;line-height:1.65;color:#526158;">Hello ${safeName}. An Administrator created your Scout account.</p>
+            <p style="margin:0 0 24px;font-size:14px;line-height:1.6;color:#526158;">Your username is <strong style="color:#17231c;">${safeUsername}</strong>. Choose a private password to activate your account.</p>
+            <p style="margin:0 0 26px;"><a href="${safeUrl}" style="display:inline-block;padding:13px 20px;border-radius:6px;background:#216b4a;color:#ffffff;font-size:14px;font-weight:700;text-decoration:none;">Activate Account</a></p>
+            <p style="margin:0 0 12px;font-size:13px;line-height:1.6;color:#526158;">This invitation expires in 24 hours and can be used once.</p>
+            <p style="margin:0;font-size:13px;line-height:1.6;color:#526158;">If you were not expecting this invitation, contact your ScoutOS Administrator.</p>
+          </td></tr>
+        </table>
+      </td></tr>
+    </table>
+  </body>
+</html>`;
+
+  return { text, html };
+}
+
 export async function sendPasswordResetEmail({ to, resetUrl }, options) {
   const { configuration, transporter } = configuredMailer(options);
   const message = createPasswordResetEmail(resetUrl);
@@ -170,6 +211,30 @@ export async function sendPasswordResetEmail({ to, resetUrl }, options) {
 
     if (!Array.isArray(info.accepted) || info.accepted.length === 0) {
       const error = new Error("SMTP server did not accept the reset recipient.");
+      error.code = "SMTP_RECIPIENT_NOT_ACCEPTED";
+      throw error;
+    }
+
+    return { acceptedCount: info.accepted.length, rejectedCount: info.rejected?.length || 0 };
+  } finally {
+    transporter.close?.();
+  }
+}
+
+export async function sendScoutInvitationEmail(message, options) {
+  const { configuration, transporter } = configuredMailer(options);
+  const content = createScoutInvitationEmail(message);
+  try {
+    const info = await transporter.sendMail({
+      from: configuration.from,
+      to: message.to,
+      subject: "Activate your SCOUT OS account",
+      text: content.text,
+      html: content.html,
+    });
+
+    if (!Array.isArray(info.accepted) || info.accepted.length === 0) {
+      const error = new Error("SMTP server did not accept the invitation recipient.");
       error.code = "SMTP_RECIPIENT_NOT_ACCEPTED";
       throw error;
     }

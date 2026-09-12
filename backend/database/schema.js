@@ -1,4 +1,5 @@
 import db from "./db.js";
+import { ensureAccountInvitationSchema } from "./accountInvitationMigration.js";
 import { ensureAccessSchema } from "./accessMigration.js";
 import { ensureAttendanceSchema } from "./attendanceMigration.js";
 import { ensureEventSchema } from "./eventMigration.js";
@@ -155,5 +156,6 @@ export async function ensureCoreSchema() {
   await ensureFinanceSchema();
   await ensureGallerySchema();
   await ensurePasswordResetSchema();
+  await ensureAccountInvitationSchema();
   await ensurePointsSchema();
 }

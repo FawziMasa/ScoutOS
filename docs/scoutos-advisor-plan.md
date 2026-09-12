@@ -11,6 +11,9 @@ Date: 2026-09-12
   so it must still be run from Render with the production database environment.
 - Automated backup status and a restoration drill must be confirmed by an
   operator in the managed database dashboard.
+- Phase 2 is implemented: Admin-only Scout invitations, 24-hour hashed tokens,
+  self-service password setup, resend/revoke/expiry/failure states, and focused
+  authorization and token tests.
 
 ## Executive verdict
 

@@ -77,7 +77,7 @@ function Register() {
           <div className="auth-heading">
             <span className="eyebrow">Initial system setup</span>
             <h2>Create the Admin account</h2>
-            <p>The first account controls ScoutOS and can later create Group Leader and Unit Leader accounts.</p>
+            <p>The first account controls ScoutOS, creates leader accounts, and securely invites Scouts.</p>
           </div>
 
           {error && <div className="form-error">{error}</div>}

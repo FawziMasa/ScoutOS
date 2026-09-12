@@ -2,6 +2,7 @@ import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import "./App.css";
 
 import AppLayout from "./components/AppLayout";
+import AcceptInvitation from "./pages/AcceptInvitation";
 import AttendanceHistory from "./pages/AttendanceHistory";
 import Attendance from "./pages/Attendance";
 import Dashboard from "./pages/Dashboard";
@@ -36,6 +37,7 @@ function App() {
         <Route path="/register" element={<Register />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/accept-invitation" element={<AcceptInvitation />} />
 
         <Route element={<ProtectedRoute />}>
           <Route path="/dashboard" element={<Dashboard />} />

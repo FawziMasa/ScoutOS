@@ -1,4 +1,5 @@
 export type UserRole = "ADMIN" | "GROUP_LEADER" | "UNIT_LEADER" | "SCOUT";
+export type AccountState = "ACTIVE" | "INVITED" | "EXPIRED" | "INVITATION_FAILED" | "INACTIVE";
 
 export const scoutUnits = [
   "أشبال و زهرات",
@@ -53,6 +54,8 @@ export type AuthUser = {
   scoutId: string | null;
   permissions: UserPermissions;
   active: boolean;
+  accountState: AccountState;
+  invitationExpiresAt: string | null;
   createdAt: string;
 };
 
@@ -502,6 +505,20 @@ export const api = {
       false,
     ),
 
+  invitationStatus: (token: string) =>
+    request<{ invitation: { fullName: string; username: string; expiresAt: string } }>(
+      "/auth/invitation-status",
+      { method: "POST", body: JSON.stringify({ token }) },
+      false,
+    ),
+
+  acceptInvitation: (token: string, password: string, confirmPassword: string) =>
+    request<{ message: string }>(
+      "/auth/accept-invitation",
+      { method: "POST", body: JSON.stringify({ token, password, confirmPassword }) },
+      false,
+    ),
+
   me: () => request<{ user: AuthUser }>("/auth/me"),
 
   scouts: {
@@ -535,6 +552,13 @@ export const api = {
       }),
     remove: (id: string) =>
       request<void>(`/users/${id}`, { method: "DELETE" }),
+    sendInvitation: (id: string) =>
+      request<{ message: string; invitation: { state: "INVITED"; expiresAt: string } }>(
+        `/users/${id}/invitation`,
+        { method: "POST" },
+      ),
+    revokeInvitation: (id: string) =>
+      request<{ message: string }>(`/users/${id}/invitation`, { method: "DELETE" }),
   },
 
   attendance: {

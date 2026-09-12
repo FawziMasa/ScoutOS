@@ -27,7 +27,17 @@ import {
   handleForgotPassword,
   handleResetPassword,
 } from "./controllers/passwordResetController.js";
+import {
+  handleAcceptInvitation,
+  handleInvitationStatus,
+  handleIssueInvitation,
+  handleRevokeInvitation,
+} from "./controllers/accountInvitationController.js";
 import { safeEmailError, verifyEmailConfiguration } from "./services/emailService.js";
+import {
+  getAccountWithInvitationState,
+  listAccountsWithInvitationState,
+} from "./services/accountInvitationService.js";
 import { normalizeEmail } from "./services/passwordResetService.js";
 import {
   LEADER_ROLES,
@@ -221,6 +231,8 @@ function publicUser(user) {
     scoutId: user.scoutId || user.scout_id || null,
     permissions: user.permissions || permissionsFor(user),
     active: Boolean(user.active),
+    accountState: user.accountState || user.account_state || (Boolean(user.active) ? "ACTIVE" : "INACTIVE"),
+    invitationExpiresAt: user.invitationExpiresAt || user.invitation_expires_at || null,
     createdAt: user.createdAt || user.created_at,
   };
 
@@ -281,14 +293,19 @@ function validateAccount(body, firstAccount = false, editing = false) {
     ? [...new Set(rawUnitIds.map(Number).filter((id) => Number.isInteger(id) && id > 0))]
     : [];
   const scoutId = role === "SCOUT" ? String(body.scoutId || "").trim() : null;
-  const active = body.active === undefined ? true : Boolean(body.active);
+  const active = role === "SCOUT" && !editing
+    ? false
+    : body.active === undefined ? true : Boolean(body.active);
 
   if (fullName.length < 2) return { error: "Full name is required." };
   if (!/^[a-zA-Z0-9._-]{3,30}$/.test(username)) {
     return { error: "Username must be 3-30 letters, numbers, dots, dashes, or underscores." };
   }
   if (!email) return { error: "A valid email address is required." };
-  if ((!editing || password) && password.length < 8) {
+  if (role === "SCOUT" && password) {
+    return { error: "Scout passwords must be chosen through an invitation or password reset." };
+  }
+  if (((!editing && role !== "SCOUT") || password) && password.length < 8) {
     return { error: "Password must be at least 8 characters." };
   }
   if (!roles.includes(role)) return { error: "Invalid role." };
@@ -512,6 +529,14 @@ const server = createServer(async (request, response) => {
       return handleResetPassword({ request, response, db, send, readJson, hashPassword });
     }
 
+    if (request.method === "POST" && path === "/api/auth/invitation-status") {
+      return handleInvitationStatus({ request, response, db, send, readJson });
+    }
+
+    if (request.method === "POST" && path === "/api/auth/accept-invitation") {
+      return handleAcceptInvitation({ request, response, db, send, readJson, hashPassword });
+    }
+
     if (request.method === "POST" && path === "/api/auth/login") {
       const body = await readJson(request);
 
@@ -636,9 +661,7 @@ const server = createServer(async (request, response) => {
     if (path === "/api/users" && request.method === "GET") {
       requireAnyRole(user, ["ADMIN"], "Only an Admin can view account administration.");
 
-      const [rows] = await db.execute(
-        "SELECT * FROM users ORDER BY created_at DESC"
-      );
+      const rows = await listAccountsWithInvitationState(db);
       const managedUsers = await Promise.all(rows.map((account) => hydrateUserAccess(db, account)));
 
       return send(response, 200, { users: managedUsers.map(publicUser) });
@@ -670,7 +693,7 @@ const server = createServer(async (request, response) => {
             validation.value.fullName,
             validation.value.username,
             validation.value.email,
-            hashPassword(validation.value.password),
+            hashPassword(validation.value.password || randomBytes(32).toString("base64url")),
             validation.value.role,
             assignedUnits[0]?.name || null,
             validation.value.scoutId,
@@ -686,9 +709,31 @@ const server = createServer(async (request, response) => {
       } finally {
         connection.release();
       }
-      const [createdRows] = await db.execute("SELECT * FROM users WHERE id = ? LIMIT 1", [newUserId]);
-      const newUser = await hydrateUserAccess(db, createdRows[0]);
+      const createdAccount = await getAccountWithInvitationState(db, newUserId);
+      const newUser = await hydrateUserAccess(db, createdAccount);
       return send(response, 201, { user: publicUser(newUser) });
+    }
+
+    const invitationMatch = path.match(/^\/api\/users\/(\d+)\/invitation$/);
+    if (invitationMatch && request.method === "POST") {
+      requireAnyRole(user, ["ADMIN"], "Only an Admin can send Scout invitations.");
+      return handleIssueInvitation({
+        response,
+        db,
+        send,
+        userId: Number(invitationMatch[1]),
+        createdBy: Number(user.id),
+        frontendUrl: allowedOrigin,
+      });
+    }
+    if (invitationMatch && request.method === "DELETE") {
+      requireAnyRole(user, ["ADMIN"], "Only an Admin can revoke Scout invitations.");
+      return handleRevokeInvitation({
+        response,
+        db,
+        send,
+        userId: Number(invitationMatch[1]),
+      });
     }
 
     const userMatch = path.match(/^\/api\/users\/(\d+)$/);
@@ -706,6 +751,14 @@ const server = createServer(async (request, response) => {
         );
         const current = currentRows[0];
         if (!current) throw createHttpError(404, "User account not found.");
+
+        if (
+          validation.value.role === "SCOUT" &&
+          validation.value.active &&
+          (!Boolean(current.active) || current.role !== "SCOUT")
+        ) {
+          throw createHttpError(400, "An inactive Scout account must accept an invitation before activation.");
+        }
 
         if (current.role === "ADMIN" && (validation.value.role !== "ADMIN" || !validation.value.active)) {
           const [adminRows] = await connection.execute(
@@ -748,6 +801,11 @@ const server = createServer(async (request, response) => {
            WHERE id = ?`,
           values,
         );
+        await connection.execute(
+          `UPDATE account_invitations SET revoked_at = NOW()
+           WHERE user_id = ? AND used_at IS NULL AND revoked_at IS NULL`,
+          [userId],
+        );
         await replaceUserUnits(connection, userId, assignedUnits);
         await connection.commit();
       } catch (error) {
@@ -756,8 +814,8 @@ const server = createServer(async (request, response) => {
       } finally {
         connection.release();
       }
-      const [updatedRows] = await db.execute("SELECT * FROM users WHERE id = ? LIMIT 1", [userId]);
-      return send(response, 200, { user: publicUser(await hydrateUserAccess(db, updatedRows[0])) });
+      const updatedAccount = await getAccountWithInvitationState(db, userId);
+      return send(response, 200, { user: publicUser(await hydrateUserAccess(db, updatedAccount)) });
     }
 
     if (userMatch && request.method === "DELETE") {
@@ -766,22 +824,40 @@ const server = createServer(async (request, response) => {
       if (String(user.id) === String(userId)) {
         return send(response, 400, { error: "You cannot deactivate your own signed-in account." });
       }
-      const [accounts] = await db.execute("SELECT id, role, active FROM users WHERE id = ? LIMIT 1", [userId]);
-      const account = accounts[0];
-      if (!account) return send(response, 404, { error: "User account not found." });
-      if (account.role === "ADMIN" && Boolean(account.active)) {
-        const [adminRows] = await db.execute(
-          "SELECT COUNT(*) AS total FROM users WHERE role = 'ADMIN' AND active = 1 AND id <> ?",
+      const connection = await db.getConnection();
+      try {
+        await connection.beginTransaction();
+        const [accounts] = await connection.execute(
+          "SELECT id, role, active FROM users WHERE id = ? LIMIT 1 FOR UPDATE",
           [userId],
         );
-        if (Number(adminRows[0]?.total || 0) === 0) {
-          return send(response, 400, { error: "ScoutOS must keep at least one active Admin account." });
+        const account = accounts[0];
+        if (!account) throw createHttpError(404, "User account not found.");
+        if (account.role === "ADMIN" && Boolean(account.active)) {
+          const [adminRows] = await connection.execute(
+            "SELECT COUNT(*) AS total FROM users WHERE role = 'ADMIN' AND active = 1 AND id <> ?",
+            [userId],
+          );
+          if (Number(adminRows[0]?.total || 0) === 0) {
+            throw createHttpError(400, "ScoutOS must keep at least one active Admin account.");
+          }
         }
+        await connection.execute(
+          "UPDATE users SET active = 0, session_version = session_version + 1 WHERE id = ?",
+          [userId],
+        );
+        await connection.execute(
+          `UPDATE account_invitations SET revoked_at = NOW()
+           WHERE user_id = ? AND used_at IS NULL AND revoked_at IS NULL`,
+          [userId],
+        );
+        await connection.commit();
+      } catch (error) {
+        await connection.rollback();
+        throw error;
+      } finally {
+        connection.release();
       }
-      await db.execute(
-        "UPDATE users SET active = 0, session_version = session_version + 1 WHERE id = ?",
-        [userId],
-      );
       return sendNoContent(response);
     }
 
